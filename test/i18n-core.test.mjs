@@ -2,7 +2,7 @@
 // and the client (src/i18n.js).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldTranslate, wrapTranslation, nextI18nState } from '../src/i18n-core.js';
+import { shouldTranslate, wrapTranslation, nextI18nState, toTemplate, fromTemplate } from '../src/i18n-core.js';
 
 test('shouldTranslate: empty and whitespace-only strings are skipped', () => {
   assert.equal(shouldTranslate(''), false);
@@ -70,4 +70,37 @@ test('nextI18nState: current text differs from our last write — the app change
   const r = nextI18nState('ADD TASK', { original: 'ADD', applied: 'AÑADIR' });
   assert.equal(r.action, 'translate');
   assert.equal(r.original, 'ADD TASK');
+});
+
+test('toTemplate: replaces digit runs (numbers, times, money) with indexed placeholders', () => {
+  assert.deepEqual(toTemplate('Reply to 14 DMs'), { template: 'Reply to {{0}} DMs', nums: ['14'] });
+  assert.deepEqual(toTemplate('$50'), { template: '${{0}}', nums: ['50'] });
+  assert.deepEqual(toTemplate('11:00'), { template: '{{0}}:{{1}}', nums: ['11', '00'] });
+  assert.deepEqual(toTemplate('4:5'), { template: '{{0}}:{{1}}', nums: ['4', '5'] });
+  assert.deepEqual(toTemplate('No numbers here'), { template: 'No numbers here', nums: [] });
+});
+
+test('fromTemplate: restores captured numbers into their placeholders', () => {
+  assert.equal(fromTemplate('Reply to {{0}} DMs', ['14']), 'Reply to 14 DMs');
+  assert.equal(fromTemplate('{{0}}:{{1}}', ['11', '00']), '11:00');
+  assert.equal(fromTemplate('No numbers here', []), 'No numbers here');
+});
+
+test('fromTemplate: a translation may reorder placeholders — each {{n}} still maps to nums[n]', () => {
+  assert.equal(fromTemplate('{{1}} de {{0}}', ['A', 'B']), 'B de A');
+});
+
+test('toTemplate/fromTemplate: round-trip for a variety of dynamic UI strings', () => {
+  const samples = [
+    'Reply to 14 DMs',
+    'Triage 14 internal emails',
+    'Follow up 24 quotes sent last week',
+    'Session resets 11:00 · week resets 12:00.',
+    '$50',
+    'No numbers here',
+  ];
+  for (const s of samples) {
+    const { template, nums } = toTemplate(s);
+    assert.equal(fromTemplate(template, nums), s);
+  }
 });

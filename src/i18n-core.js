@@ -39,6 +39,32 @@ export function wrapTranslation(original, translated) {
   return lead + translated + trail;
 }
 
+const PLACEHOLDER_RE = /\{\{(\d+)\}\}/g;
+
+/** Normalizes a string for cache/request purposes by replacing every run of digits (a plain
+ *  number, a time like 11:00 or 4:5, a money amount like $50, …) with an indexed `{{n}}`
+ *  placeholder, so "Reply to 14 DMs" and "Reply to 9 DMs" collapse to the same template and are
+ *  translated — and cached — once. The double-brace syntax is deliberately different from the
+ *  app's own single-brace `{co}`/`{n}` template vars (see profile.js/tasks.js), which are always
+ *  substituted with real values before the text ever reaches the DOM, so there is no risk of
+ *  colliding with real UI text. Returns the template and the digit runs it pulled out, in order. */
+export function toTemplate(str) {
+  const nums = [];
+  const template = String(str).replace(/\d+/g, m => { nums.push(m); return `{{${nums.length - 1}}}`; });
+  return { template, nums };
+}
+
+/** The inverse of toTemplate: puts each captured digit run back where its placeholder is.
+ *  Placeholders may appear in a different order than they were captured (a translation is free
+ *  to reorder them for grammar); each `{{n}}` is simply replaced with `nums[n]`. A placeholder
+ *  with no matching number (should not happen once validated) is left as-is rather than dropped. */
+export function fromTemplate(template, nums) {
+  return String(template).replace(PLACEHOLDER_RE, (whole, i) => {
+    const n = nums && nums[+i];
+    return n === undefined ? whole : n;
+  });
+}
+
 /** The loop-guard decision: given the DOM's current text/attribute value and what we remember
  *  ({ original, applied } from the last time we translated this node), decide whether this
  *  change is our own write (skip — it already equals what we applied) or a change made by the

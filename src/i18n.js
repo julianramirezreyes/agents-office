@@ -6,13 +6,19 @@
 //
 // Demo mode (file://, no server): initI18n() hides the toggle and does nothing else — there is
 // nowhere to ask for a translation and no point pretending otherwise.
-import { shouldTranslate, wrapTranslation, nextI18nState } from './i18n-core.js';
+import { shouldTranslate, wrapTranslation, nextI18nState, toTemplate, fromTemplate } from './i18n-core.js';
 
 const STORAGE_KEY = 'ao.lang';
 const API = '/api/translate';
-const DEBOUNCE_MS = 400;
+// V3.7.1 (T5): the demo feed and clock mint endless numeric variants ("1 min", "2 min", "Reply to
+// 14 DMs", a clock string with the minute baked in, …). Coalescing on a longer debounce, and
+// caching/deduping by TEMPLATE (see toTemplate in i18n-core.js — digit runs become {{0}}, {{1}}, …)
+// rather than by the raw string, is what keeps steady-state traffic near zero instead of growing
+// forever with the feed.
+const DEBOUNCE_MS = 1500;
 const CLIENT_BATCH = 200; // stays under the server's 400-item cap even after a burst of mutations
 const ATTRS = ['placeholder', 'title', 'aria-label'];
+const RELAYOUT_EVENT = 'ao-i18n-applied'; // T6: tells anything laying out translated text (the task feed) to re-snap
 // Never translated: the chat rail (#mMsgs — user messages, agent replies, deliverables, approval
 // asks are all "chat message bodies" / "agent deliverables" per scope) and the brain note pane
 // (#bvPane — the owner's own note titles/content, which we also must not ship off to a translate
@@ -24,9 +30,11 @@ let lang = 'en';
 let toggleBtn = null;
 let observer = null;
 let flushTimer = null;
-let pending = new Map(); // source string -> Set<applyFn>, queued since the last flush
-const inflightAppliers = new Map(); // source string -> Set<applyFn>, sent to the server, awaiting a reply
-const cache = new Map(); // source string -> translation, once known (prefilled or fetched)
+let pending = new Map(); // template -> Set<{ nums, apply }>, queued since the last flush
+const inflight = new Map(); // template -> Set<{ nums, apply }>, sent to the server, awaiting a reply
+const cache = new Map(); // template -> translated template, once known (prefilled or fetched)
+const failed = new Set(); // template -> remembered as failed this page session; never retried until reload
+let relayoutScheduled = false;
 
 const textState = new WeakMap(); // Text node -> { original, applied }
 const attrState = new WeakMap(); // Element -> { [attr]: { original, applied } }
@@ -49,43 +57,62 @@ function updateToggle() {
   toggleBtn.setAttribute('aria-label', toggleBtn.title);
 }
 
-/* ---------- queue → debounce → batch → apply ---------- */
+/* ---------- queue → debounce → batch → apply, all keyed by template (T5) ---------- */
+// "Reply to 14 DMs" and "Reply to 9 DMs" both normalize to the template "Reply to {{0}} DMs" (see
+// toTemplate in i18n-core.js), so they share one cache entry and, if both are still missing, one
+// request — instead of the demo feed's endless numeric variants each minting a fresh POST.
 function queue(source, apply) {
   if (!shouldTranslate(source)) return;
-  if (cache.has(source)) { apply(cache.get(source)); return; }
-  let set = pending.get(source);
-  if (!set) { set = new Set(); pending.set(source, set); }
-  set.add(apply);
+  const { template, nums } = toTemplate(source);
+  if (cache.has(template)) { apply(fromTemplate(cache.get(template), nums)); return; }
+  if (failed.has(template)) return; // already failed this page session — do not retry (avoid retry storms)
+  let set = pending.get(template);
+  if (!set) { set = new Set(); pending.set(template, set); }
+  set.add({ nums, apply });
   if (!flushTimer) flushTimer = setTimeout(flush, DEBOUNCE_MS);
 }
 
 function flush() {
   flushTimer = null;
   const table = pending; pending = new Map();
-  const toSend = [];
-  for (const [source, appliers] of table) {
-    const already = inflightAppliers.get(source);
-    if (already) { for (const fn of appliers) already.add(fn); continue; } // already asked — piggyback on that request
-    inflightAppliers.set(source, appliers);
-    toSend.push(source);
+  const toSend = []; // [{ template, rep }], one representative raw string per still-missing template
+  for (const [template, waiters] of table) {
+    // A waiter can sit in `pending` for up to DEBOUNCE_MS before this runs; the app keeps rebuilding
+    // rows in the meantime (see tasks.js render()), so the very same template may *also* have been
+    // asked for — and already resolved, one way or the other — by an earlier flush() in that window.
+    // Re-check cache/failed here, not just at queue() time, or an already-answered template gets
+    // needlessly re-sent on every debounce cycle it happens to still have a fresh waiter in.
+    if (cache.has(template)) { const t = cache.get(template); for (const w of waiters) w.apply(fromTemplate(t, w.nums)); continue; }
+    if (failed.has(template)) continue;
+    const already = inflight.get(template);
+    if (already) { for (const w of waiters) already.add(w); continue; } // already asked — piggyback on that request
+    inflight.set(template, waiters);
+    toSend.push({ template, rep: fromTemplate(template, [...waiters][0].nums) });
   }
   for (let i = 0; i < toSend.length; i += CLIENT_BATCH) sendBatch(toSend.slice(i, i + CLIENT_BATCH));
 }
 
-async function sendBatch(batch) {
+async function sendBatch(entries) {
   let map = null;
   try {
-    const res = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lang, texts: batch }) });
+    const res = await fetch(API, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lang, texts: entries.map(e => e.rep) }) });
     if (res.ok) ({ map } = await res.json());
-  } catch { /* offline mid-session — these stay untranslated until something re-queues them */ }
-  for (const s of batch) {
-    const appliers = inflightAppliers.get(s);
-    inflightAppliers.delete(s);
-    const translated = map && map[s];
-    if (!translated) continue;
-    cache.set(s, translated);
-    if (appliers) for (const fn of appliers) fn(translated);
+  } catch { /* offline mid-session — treated the same as no answer below */ }
+  for (const { template, rep } of entries) {
+    const waiters = inflight.get(template);
+    inflight.delete(template);
+    const restored = map && map[rep]; // the representative's own translation, numbers already back in place
+    if (!restored) { failed.add(template); continue; } // remembered for the session — never retried until reload
+    const translatedTemplate = toTemplate(restored).template; // recover the reusable template for future numeric variants
+    cache.set(template, translatedTemplate);
+    if (waiters) for (const w of waiters) w.apply(fromTemplate(translatedTemplate, w.nums));
   }
+}
+
+function scheduleRelayout() {
+  if (relayoutScheduled) return;
+  relayoutScheduled = true;
+  requestAnimationFrame(() => { relayoutScheduled = false; window.dispatchEvent(new CustomEvent(RELAYOUT_EVENT)); });
 }
 
 /* ---------- text nodes + the three attributes ---------- */
@@ -95,6 +122,7 @@ function applyToTextNode(node, original) {
     const out = wrapTranslation(original, translated);
     textState.set(node, { original, applied: out });
     node.nodeValue = out;
+    scheduleRelayout(); // T6: a row's height may have just changed — let anything FLIP-animating it re-snap
   };
 }
 function applyToAttr(el, attr, original) {
@@ -197,6 +225,7 @@ function deactivate() {
   pending = new Map();
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
   document.documentElement.lang = 'en';
+  scheduleRelayout(); // T6: restoring English can also change row heights — re-snap the same way
 }
 
 function setLang(l) {

@@ -91,9 +91,17 @@ test('translate: a fresh translator instance reads the dictionary another instan
   assert.deepEqual(out, { ADD: 'AÑADIR' });
 });
 
+// A base-26 letter suffix, not a digit — so each of these stays its own template after T5's
+// number-templating (see toTemplate), keeping this test about batch-size chunking only.
+function letterSuffix(i) {
+  let s = '';
+  do { s = String.fromCharCode(65 + (i % 26)) + s; i = Math.floor(i / 26) - 1; } while (i >= 0);
+  return s;
+}
+
 test('translate: batches misses into groups of at most BATCH_SIZE', async () => {
   const dir = tmpDir();
-  const strings = Array.from({ length: BATCH_SIZE + 5 }, (_, i) => `Label number ${i}`);
+  const strings = Array.from({ length: BATCH_SIZE + 5 }, (_, i) => `Label number ${letterSuffix(i)}`);
   const batchSizes = [];
   const t = createTranslator({
     dataDir: dir,
@@ -134,6 +142,60 @@ test('translate: concurrent requests for the same missing string dedupe into one
   assert.equal(calls, 1);
   assert.deepEqual(a, { 'Shared label': 'Shared label (es)' });
   assert.deepEqual(b, { 'Shared label': 'Shared label (es)' });
+});
+
+test('validateTranslationResponse: rejects a translation whose placeholder set differs from the source', () => {
+  const requested = ['Reply to {{0}} DMs', 'Hi {{0}} and {{1}}'];
+  const out = validateTranslationResponse(JSON.stringify({
+    'Reply to {{0}} DMs': 'Responder a {{0}} DMs', // placeholders match — kept
+    'Hi {{0}} and {{1}}': 'Hola {{0}}', // {{1}} dropped — rejected
+  }), requested);
+  assert.deepEqual(out, { 'Reply to {{0}} DMs': 'Responder a {{0}} DMs' });
+});
+
+test('validateTranslationResponse: accepts a translation that reorders placeholders', () => {
+  const requested = ['{{0}} de {{1}}'];
+  const out = validateTranslationResponse(JSON.stringify({ '{{0}} de {{1}}': '{{1}} of {{0}}' }), requested);
+  assert.deepEqual(out, { '{{0}} de {{1}}': '{{1}} of {{0}}' });
+});
+
+test('translate: two numeric variants of the same template share one ask call, each restored with its own number', async () => {
+  const dir = tmpDir();
+  let calls = 0, seenBatch = null;
+  const t = createTranslator({
+    dataDir: dir,
+    ask: async (sys, user) => {
+      calls++;
+      seenBatch = JSON.parse(user);
+      return JSON.stringify(Object.fromEntries(seenBatch.map(tpl => [tpl, tpl.replace('Reply to', 'Responder a')])));
+    },
+  });
+  const out = await t.translate('es', ['Reply to 14 DMs', 'Reply to 9 DMs']);
+  assert.equal(calls, 1);
+  assert.deepEqual(seenBatch, ['Reply to {{0}} DMs']);
+  assert.deepEqual(out, { 'Reply to 14 DMs': 'Responder a 14 DMs', 'Reply to 9 DMs': 'Responder a 9 DMs' });
+});
+
+test('translate: a later request for a new numeric variant of an already-cached template hits the cache, no new ask call', async () => {
+  const dir = tmpDir();
+  let calls = 0;
+  const t = createTranslator({
+    dataDir: dir,
+    ask: async (sys, user) => { calls++; const batch = JSON.parse(user); return JSON.stringify(Object.fromEntries(batch.map(tpl => [tpl, tpl.replace('Reply to', 'Responder a')]))); },
+  });
+  await t.translate('es', ['Reply to 14 DMs']);
+  assert.equal(calls, 1);
+  const out = await t.translate('es', ['Reply to 9 DMs']);
+  assert.equal(calls, 1);
+  assert.deepEqual(out, { 'Reply to 9 DMs': 'Responder a 9 DMs' });
+});
+
+test('translate: the on-disk dictionary is keyed by template, not by the literal numeric string', async () => {
+  const dir = tmpDir();
+  const t = createTranslator({ dataDir: dir, ask: async (sys, user) => { const batch = JSON.parse(user); return JSON.stringify(Object.fromEntries(batch.map(tpl => [tpl, tpl.replace('Reply to', 'Responder a')]))); } });
+  await t.translate('es', ['Reply to 14 DMs']);
+  const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'i18n', 'es.json'), 'utf8'));
+  assert.deepEqual(onDisk, { 'Reply to {{0}} DMs': 'Responder a {{0}} DMs' });
 });
 
 test('dictionary: returns the cached table for es, {} for en, null for an unknown language', async () => {
