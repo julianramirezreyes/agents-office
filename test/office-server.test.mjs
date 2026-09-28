@@ -100,9 +100,10 @@ test('server_shutdownStopsAcceptingWorkAndPersistsTaskState', async () => {
   runtimes.push(runtime);
   await runtime.start();
   const base = `http://127.0.0.1:${runtime.server.address().port}`;
-  await runtime.close({ graceMs: 0 });
+  const stopped = await runtime.close({ graceMs: 0 });
   runtimes.splice(runtimes.indexOf(runtime), 1);
 
+  assert.deepEqual(stopped, { drained: true, pendingWork: 0 });
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(paths.dataRoot, 'tasks.json'), 'utf8')), [{ id: 'keep', title: 'persist me' }]);
   await assert.rejects(fetch(`${base}/api/tasks`));
 });
