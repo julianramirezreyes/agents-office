@@ -48,8 +48,9 @@ DO-03 está cerrada en el tracker ODD tras observar dependencia fijada, import d
 
 ## Commit y rollback
 
-- Commit de implementación: `5143072` (`feat: add local Codex provider adapter`).
-- Rollback: revertir `5143072`; afecta solo al adaptador Codex, su integración de servidor, sus pruebas y el registro DO-03; no modifica datos del usuario, configuración de Claude ni manifests.
+- Commits de implementación/corrección: `5143072` (`feat: add local Codex provider adapter`), `27aac42` (`fix: contain Codex cwd and defer approval state`) y `2300a02` (`fix: require completed Codex approval result`).
+- Commit de dependencia y cierre: `21f2f37` (`feat: add Codex SDK dependency`), con manifest/lock y evidencia de verificación.
+- Rollback: revertir estos commits en orden inverso; afecta solo al adaptador Codex, su integración/pruebas, la dependencia y el registro DO-03; no modifica datos del usuario ni configuración de Claude.
 
 ## skill_resolution
 
