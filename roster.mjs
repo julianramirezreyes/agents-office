@@ -59,9 +59,10 @@ export function validate(doc, base = defaults()) {
   return { agents: out, problems };
 }
 function read(p) { if (!fs.existsSync(p)) return null; try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { return { __error: e.message }; } }
-export function loadRoster(brainPath = loadConfig().brainPath) {
+export function loadRoster(brainPath = loadConfig().brainPath, { office = 'claude' } = {}) {
   let agents = defaults(); const problems = [];
-  const sources = [FILE, brainFile(brainPath), LOCAL];
+  // Codex customizations belong in its isolated brain; never inherit Claude's app-level roster.
+  const sources = office === 'codex' ? [brainFile(brainPath)] : [FILE, brainFile(brainPath), LOCAL];
   const label = p => p === FILE || p === LOCAL ? path.basename(p) : 'brain/Agents Office/agents.json';
   for (const p of sources) {
     const doc = read(p); if (!doc) continue;

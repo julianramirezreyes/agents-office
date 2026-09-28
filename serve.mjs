@@ -71,14 +71,14 @@ const RUN_TIMEOUT = Math.max(60, +cfg.timeout || 300) * 1000; // agents with too
 { const e = normEffort(cfg.effort); if (cfg.effort && !e) console.warn(`config: effort must be low, medium, high, xhigh or max (got "${cfg.effort}") — using the model's own`); cfg.effort = e || ''; } // V3.6.1: the office's effort, empty = the model's own
 mcp.configure(cfg);
 const TEAMS = teams.settings(cfg); // V3.2 (16 Sep): { enabled, max }
-const roster = loadRoster(BRAIN);
+const roster = loadRoster(BRAIN, { office: OFFICE });
 const AGENTS = roster.agents; // id · department · lead · name · role · does · tools · brief
 for (const w of roster.problems) console.warn('agents:', w);
 let skills = loadSkills(BRAIN, AGENTS); // reloaded before every task and chat, so a new skill needs no restart
 for (const w of skills.problems) console.warn('skills:', w);
 // the roster's editable fields are re-read too (a brief written by the lead's interview, or by hand, lands without a restart)
 function reloadRoster() {
-  const r = loadRoster(BRAIN);
+  const r = loadRoster(BRAIN, { office: OFFICE });
   for (const a of r.agents) { const cur = AGENTS.find(x => x.id === a.id); if (cur) Object.assign(cur, { name: a.name, role: a.role, does: a.does, tools: a.tools, brief: a.brief }); }
   if (r.problems.join() !== roster.problems.join()) for (const w of r.problems) console.warn('agents:', w);
   Object.assign(roster, { problems: r.problems, customised: r.customised, briefed: r.briefed, files: r.files });

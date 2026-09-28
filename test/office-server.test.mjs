@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, test } from 'node:test';
 import { createOfficeRuntime } from '../serve.mjs';
 import { loadConfig } from '../config.mjs';
+import { loadRoster } from '../roster.mjs';
 
 const runtimes = [];
 const tempRoots = [];
@@ -111,4 +112,15 @@ test('claudeDefaultStartup_preservesExistingConfigAndDataPaths', async () => {
   assert.equal(config.configPath, undefined);
   assert.equal(config.dataRoot, undefined);
   assert.equal(config.brainPath, path.resolve(process.cwd(), config.brain));
+});
+
+test('codexRoster_usesOnlyItsIsolatedBrainCustomization', () => {
+  const paths = fixture();
+  const officeDir = path.join(paths.brainPath, 'Agents Office');
+  fs.mkdirSync(officeDir, { recursive: true });
+  fs.writeFileSync(path.join(officeDir, 'agents.json'), JSON.stringify({ agents: [{ id: 'elead', name: 'CODEX EMAIL LEAD' }] }));
+
+  const roster = loadRoster(paths.brainPath, { office: 'codex' });
+  assert.equal(roster.agents.find(agent => agent.id === 'elead').name, 'CODEX EMAIL LEAD');
+  assert.deepEqual(roster.files, ['brain/Agents Office/agents.json']);
 });
