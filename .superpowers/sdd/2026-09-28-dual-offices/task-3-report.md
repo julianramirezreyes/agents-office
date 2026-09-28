@@ -16,8 +16,9 @@ La Tarea queda **parcial**: el paquete `@openai/codex-sdk@0.157.1` no está inst
 
 - `node --test test/codex-provider.test.mjs test/office-server.test.mjs` — **20/20**.
 - `node --test test/*.test.mjs` — **88/88**.
+- Runtime harness `node --test test/codex-provider.test.mjs` — injected SDK double plus local HTTP/ephemeral port and temporary data/brain roots; **9/9** (covered by the observed combined run).
 - `npm install --package-lock-only --offline --ignore-scripts --save-exact @openai/codex-sdk@0.157.1` — **bloqueado por ENOTCACHED**; no instaló ni cambió manifests.
-- `git diff --check` — limpio.
+- `git diff --check` — limpio antes del commit.
 - Build/check no ejecutados: la comprobación de servidor existente puede recorrer lógica de proveedor; build recompone artefactos generados fuera de este alcance. No se ejecutaron auth, `codex login status`, proveedores reales ni red.
 
 ## Alcance y preservación
@@ -30,6 +31,11 @@ La Tarea queda **parcial**: el paquete `@openai/codex-sdk@0.157.1` no está inst
 ## Próximo paso
 
 Resolver disponibilidad autorizada del paquete sin añadir un lock inventado; entonces declarar la dependencia con su lockfile válido, ejecutar las mismas verificaciones locales y cerrar DO-03 solo después de observar el resultado.
+
+## Commit y rollback
+
+- Commit de implementación: `5143072` (`feat: add local Codex provider adapter`).
+- Rollback: revertir `5143072`; afecta solo al adaptador Codex, su integración de servidor, sus pruebas y el registro DO-03; no modifica datos del usuario, configuración de Claude ni manifests.
 
 ## skill_resolution
 
