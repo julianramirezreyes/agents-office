@@ -37,7 +37,7 @@ Implementada en `feat/dual-offices` dentro del alcance de la Tarea 1. Además de
 - Hash de implementación: `03d8098326a33fec089d84644bce55439391d665`.
 - Commit de corrección P1: `dc98d799c4ddfb02654e3c1e3854a2406e6c18ca` (`fix: isolate effective Codex config defaults`).
 - Commit de corrección de capacidades: `16a1181fdf9afa9511489de4f3962398e9f44d1f` (`fix: isolate Codex capabilities from Claude`).
-- Commit de corrección P2 para puertos inválidos: pendiente de crear.
+- Commit de corrección P2 para puertos inválidos: `5dd42b7e771c088bd5c1cbaa26bf617d0a21535f` (`fix: reject invalid Codex port configuration`).
 - Revisión nativa: pendiente del orquestador.
 
 ## Riesgos y seguimiento
