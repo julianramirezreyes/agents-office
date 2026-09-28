@@ -101,7 +101,7 @@ export function createLauncher({
         if (!owned || owned.exit) return;
         try {
           const health = await fetchHealth(configuredUrls[office], office);
-          if (children.get(office) !== owned || owned.exit) return;
+          if (children.get(office) !== owned || owned.exit || owned.failure) return;
           if (health?.office !== office || health?.provider !== office) {
             state.status = 'failed';
             state.error = 'Office health identity does not match the launched office';
@@ -119,7 +119,7 @@ export function createLauncher({
           state.status = health.ok === true ? 'ready' : 'failed';
           state.error = health.ok === true ? null : (health.error || 'Office health did not report ready');
         } catch (error) {
-          if (children.get(office) !== owned || owned.exit) return;
+          if (children.get(office) !== owned || owned.exit || owned.failure) return;
           state.status = 'failed';
           state.error = String(error?.message || error);
         }
@@ -153,19 +153,21 @@ export function createLauncher({
             env: processEnvironment(office, paths[office]),
             stdio: 'ignore',
           });
-          const owned = { child, exit: null, stopping: false };
+          const owned = { child, exit: null, failure: null, stopping: false };
           children.set(office, owned);
           child.once?.('error', error => {
             if (!owned.stopping) {
+              owned.failure = String(error?.message || error);
               officeState[office].status = 'failed';
-              officeState[office].error = String(error?.message || error);
+              officeState[office].error = owned.failure;
             }
           });
           child.once?.('exit', (code, signal) => {
             owned.exit = { code, signal };
             if (!owned.stopping) {
               officeState[office].status = 'failed';
-              officeState[office].error = `Office process exited unexpectedly (${signal || code})`;
+              owned.failure ||= `Office process exited unexpectedly (${signal || code})`;
+              officeState[office].error = owned.failure;
             }
           });
         } catch (error) {

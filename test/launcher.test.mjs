@@ -170,6 +170,31 @@ test('launcher_doesNotLetAnInFlightHealthProbeOverwriteChildExit', async () => {
   assert.equal(health.offices.codex.status, 'ready');
 });
 
+test('launcher_doesNotLetAnInFlightHealthProbeOverwriteChildSpawnError', async () => {
+  const config = await fixture();
+  const children = [];
+  let releaseClaudeProbe;
+  let startedClaudeProbe;
+  const claudeProbeStarted = new Promise(resolve => { startedClaudeProbe = resolve; });
+  const claudeProbe = new Promise(resolve => { releaseClaudeProbe = resolve; });
+  const { base } = await startLauncher(config, {
+    spawnProcess: () => { const child = new Child(); children.push(child); return child; },
+    fetchHealth: async url => {
+      if (url.endsWith(':4520')) { startedClaudeProbe(); return claudeProbe; }
+      return { ok: true, office: 'codex', provider: 'codex' };
+    },
+  });
+
+  const responsePromise = fetch(`${base}/api/health`).then(response => response.json());
+  await claudeProbeStarted;
+  children[0].emit('error', new Error('spawn ENOENT'));
+  releaseClaudeProbe({ ok: true, office: 'claude', provider: 'claude' });
+  const health = await responsePromise;
+  assert.equal(health.offices.claude.status, 'failed');
+  assert.equal(health.offices.claude.error, 'spawn ENOENT');
+  assert.equal(health.offices.codex.status, 'ready');
+});
+
 test('launcher_closeWaitsForConcurrentStartAndStopsItsOwnedChildren', async () => {
   const config = await fixture();
   const children = [];
