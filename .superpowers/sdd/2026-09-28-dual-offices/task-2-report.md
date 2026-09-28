@@ -22,8 +22,8 @@ El apagado marca el servidor como cerrándose, detiene el scheduler y deja de ac
 
 ## Verificación
 
-- `node --test test/office-server.test.mjs` — **10/10 pasan**.
-- `node --test test/*.test.mjs` — **78/78 pasan**.
+- `node --test test/office-server.test.mjs` — **11/11 pasan**.
+- `node --test test/*.test.mjs` — **79/79 pasan**.
 - `git diff --check` — **sin errores**.
 - `npm run build` — omitido deliberadamente: `build.mjs` regenera `src/braingraph.js` desde el brain del workspace y escribe `dist/*`; no era un check seguro/no mutante para este alcance.
 - `npm run check` — omitido deliberadamente porque ejecuta un smoke server y el alcance prohíbe invocar lógica de proveedor/auth. No se usó `npm run check:live`.
@@ -55,8 +55,16 @@ El apagado marca el servidor como cerrándose, detiene el scheduler y deja de ac
 - **Corrección P1:** el proveedor por omisión deriva de la oficina; Codex no crea SDK Anthropic, ni ejecuta uso/MCP, ni expone capacidades Claude en health. Health anuncia `backend: codex`, modelo nulo, listas de modelos vacías, herramientas/equipos desactivados y resumen MCP vacío. Las inyecciones de test espían llamadas y bloquean lecturas de credenciales.
 - **Causa P2:** `close()` sólo esperaba conexiones; el entrypoint terminaba con `process.exit(0)`, pudiendo matar tareas detached antes de guardar su resultado.
 - **Corrección P2:** `close({graceMs})` deja de aceptar requests, detiene rutinas, espera promesas activas; al vencer cierra sockets HTTP y devuelve `{ drained, pendingWork }`. Las tareas no se cancelan y persisten cuando terminan. `attachShutdownHandlers` informa el conteo pendiente y permite que Node salga naturalmente, sin `process.exit`; el caso Claude idle conserva cierre natural.
-- **GREEN:** `node --test test/office-server.test.mjs` — 10/10; `node --test test/*.test.mjs` — 78/78; `git diff --check` — limpio.
+- **GREEN:** `node --test test/office-server.test.mjs` — 11/11; `node --test test/*.test.mjs` — 79/79; `git diff --check` — limpio.
 - El cierre sin tareas conserva el resultado `{ drained: true, pendingWork: 0 }`; el test Claude existente verifica esta semántica.
 - **Límites ambientales:** `graph-build` informó que `d3-force` no está instalado y usó layout incorporado. No se ejecutaron proveedores/auth, `npm run check:live`, instalaciones ni red. Build/smoke siguen omitidos por los motivos arriba descritos.
 - **Commits de seguimiento:** `c8667aa` (`fix: isolate provider endpoints and drain shutdown work`), `2ff77b7` (`test: assert clean Claude shutdown result`), `c8ff4dd` (`docs: record DO-02 review corrections`).
-- **Hash evidencia código/tests:** `serve.mjs` `7a2593a3963ce5a713029137f1d5b598f3f42ab443bbf9e87b9284a015b14485`; `test/office-server.test.mjs` `45ba78b1bc0829f8c24c02c81c3a5d7f1e487f781d94355fe0a7b35d2d8b6300`.
+- **Hash evidencia código/tests:** `serve.mjs` `bb70d1d20be05474a1668091f10d3799791692eb9b6c1cb9deed740e038a23a4`; `test/office-server.test.mjs` `539d320c065e725e2290f2b072f829cec6b54916314138ad517eb5d38a5aa78a`.
+
+## Reapertura acotada P2 — deadline HTTP
+
+- **RED observado:** `node --test --test-name-pattern='officeRuntime_closeDeadlineAlsoCoversAnIncompleteHttpRequest' test/office-server.test.mjs` falló porque el cierre tardó más de 150 ms ante un `POST /api/chat` con `Content-Length: 1000` y body parcial, aunque no hubiese empezado ningún trabajo.
+- **Causa:** el `Promise.race` anterior competía solo contra `activeWork`; vacío, ganaba de inmediato, se limpiaba el timer y luego `await stopped` podía esperar indefinidamente al socket incompleto.
+- **GREEN:** el plazo ahora cubre conjuntamente drenaje de `activeWork` y cierre HTTP. En el timeout se destruyen sockets, `drained` es falso y el conteo de trabajos permanece honesto; tareas ya iniciadas siguen sin cancelarse ni perder persistencia. `node --test test/office-server.test.mjs` 11/11, `node --test test/*.test.mjs` 79/79, `git diff --check` limpio.
+- **Seguridad de la prueba:** TCP local con oficina Codex aislada; body deliberadamente incompleto evita alcanzar el handler, sin proveedor ni auth.
+- **Commit:** `0e5883f` (`fix: enforce shutdown deadline for partial HTTP requests`).
