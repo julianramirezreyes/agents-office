@@ -754,6 +754,15 @@ export function initTasks(ctx) {
     P_.rows.querySelectorAll('.tp-row').forEach(n => { m[n.dataset.id] = n.getBoundingClientRect(); });
     return m;
   }
+  // T6: flip() positions a row with a FLIP transform captured at render time. The live translator
+  // (src/i18n.js) can lengthen a row's meta line — sometimes wrapping it onto another line — a
+  // moment *after* that snapshot, once its async/cached reply lands; the row is then left sitting
+  // at a stale transform that no longer matches its real (reflowed) box, showing as a gap or an
+  // overlap. i18n.js dispatches 'ao-i18n-applied' (coalesced to one per animation frame) whenever
+  // it changes text; snap every row back to its transform-free, already-correctly-flowed position.
+  window.addEventListener('ao-i18n-applied', () => {
+    P_.rows.querySelectorAll('.tp-row').forEach(n => { n.style.transition = 'none'; n.style.transform = ''; });
+  });
   function flip(before) {
     P_.rows.querySelectorAll('.tp-row').forEach(n => {
       const b = before[n.dataset.id];

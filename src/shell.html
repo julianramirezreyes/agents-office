@@ -621,7 +621,7 @@
     border: 1.5px solid var(--ink); border-radius: 18px; background: #fff; padding: 5px 6px 6px 6px;
   }
   .tp-r1 { display: flex; align-items: flex-start; gap: 4px; }
-  .tp-r2 { display: flex; align-items: center; gap: 6px; padding: 0 2px 0 4px; }
+  .tp-r2 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 2px 0 4px; } /* T6: longer ES labels (REPETIR, EQUIPO, AGREGAR) wrap inside the box instead of overflowing it */
   .tp-r2 .sp { flex: 1; }
   .tp-dd {
     display: flex; align-items: center; gap: 6px; border: 0; background: none; cursor: pointer; flex: none;
@@ -673,7 +673,7 @@
   .tb-foot .tp-hint { flex: 1; padding: 0 4px; min-height: 0; }
   .tb-foot .kb { font-size: 9.5px; letter-spacing: .08em; color: var(--grey); white-space: nowrap; }
   .tb-foot .kb b { font-weight: 600; color: var(--ink); }
-  .tp-in::placeholder { color: var(--grey); }
+  .tp-in::placeholder { color: var(--grey); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* T6: a longer ES placeholder clips with an ellipsis instead of wrapping to a second line */
   .tp-add {
     flex: none; border: 1px solid var(--ink); background: var(--ink); color: var(--cream); cursor: pointer;
     font-family: var(--ui); font-size: 10px; letter-spacing: .14em; font-weight: 600;
@@ -688,10 +688,11 @@
   .tp-hint b { color: var(--ink); font-weight: 600; letter-spacing: .1em; font-size: 10px; text-transform: uppercase; }
   .tp-av { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid; flex: none;
     display: inline-grid; place-items: center; font-family: var(--serif); font-size: 11px; color: var(--ink); background: #fff; }
-  .tp-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--ink); padding: 2px 2px 7px; }
-  .tp-lab { font-family: var(--serif); font-size: 19px; letter-spacing: .04em; }
-  .tp-mode { font-family: var(--ui); font-size: 8.5px; letter-spacing: .16em; font-weight: 700; color: var(--grey);
-    border: 1px solid var(--hairline); border-radius: 99px; padding: 2px 7px; vertical-align: 4px; margin-left: 4px; }
+  .tp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-bottom: 1px solid var(--ink); padding: 2px 2px 7px; }
+  .tp-lab { display: flex; align-items: baseline; gap: 4px; min-width: 0; flex: 1 1 auto; font-family: var(--serif); font-size: 19px; letter-spacing: .04em; }
+  .tp-labtxt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* T6: a longer ES title (ESTADO DE LA TAREA) clips instead of wrapping the badge onto its own line */
+  .tp-mode { flex: none; white-space: nowrap; font-family: var(--ui); font-size: 8.5px; letter-spacing: .16em; font-weight: 700; color: var(--grey);
+    border: 1px solid var(--hairline); border-radius: 99px; padding: 2px 7px; vertical-align: 4px; }
   .tp-mode.live { color: #1E9070; border-color: rgba(30,144,112,.5); }
   .tp-mode.live::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #1E9070;
     margin-right: 5px; vertical-align: 1px; animation: liveBlink 1.2s steps(1) infinite; }
@@ -703,7 +704,7 @@
   .tp-row.live.done { cursor: pointer; opacity: .9; }
   .tp-row.live.done:hover { border-color: var(--ink); }
   .tp-res { color: #1E9070; font-weight: 600; }
-  .tp-scope { font-size: 9px; letter-spacing: .16em; color: var(--grey); font-weight: 600; }
+  .tp-scope { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; letter-spacing: .16em; color: var(--grey); font-weight: 600; } /* T6: a longer ES scope (TODA LA OFICINA) clips instead of squeezing/wrapping */
   .tp-chips { display: flex; gap: 5px; flex-wrap: wrap; }
   .tp-chip {
     display: flex; align-items: baseline; gap: 5px; border: 1px solid var(--hairline); background: none; cursor: pointer;
@@ -1175,7 +1176,7 @@
     <label class="tp-ok" title="the result waits for your approval before anything is sent"><input type="checkbox" class="tp-okc" checked> needs my OK</label>
   </div>
   <div class="tp-hint"></div>
-  <div class="tp-head"><span class="tp-lab">TASK STATUS <span class="tp-mode" hidden></span></span><span class="tp-scope">WHOLE OFFICE</span></div>
+  <div class="tp-head"><span class="tp-lab"><span class="tp-labtxt">TASK STATUS</span> <span class="tp-mode" hidden></span></span><span class="tp-scope">WHOLE OFFICE</span></div>
   <div class="tp-chips"></div>
   <div class="tp-next" hidden></div>
   <div class="tp-rows"></div>
