@@ -52,6 +52,7 @@ import * as usage from './usage.mjs';
 import * as teams from './teams.mjs';
 import { normModel, modelFor, modelArgs, modelId, modelName, MODEL_KEYS, DEFAULT_MODEL, normEffort, effortFor, effortName, EFFORT_KEYS } from './src/models.js';
 import { parseWhen, describe, valid as validWhen, untilText } from './src/when.js';
+import { createTranslator, isSupportedLang } from './translate.mjs'; // V3.7: live UI translation (EN/ES)
 
 const cfg = loadConfig();
 const HTML = path.join(ROOT, 'dist', 'command-centre-v2.html'); // built by build.mjs; shipped so npm start works without a build
@@ -157,6 +158,7 @@ async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RU
   });
 }
 const ask = async (system, user, opts) => (await askX(system, user, { tools: false, ...opts })).text;
+const translator = createTranslator({ dataDir: DATA, ask: (system, user) => ask(system, user, { effort: 'low' }) }); // V3.7: cached under data/i18n/<lang>.json
 function parseJSON(text) {
   const s = text.replace(/```json|```/g, ''); const a = s.indexOf('{'), b = s.lastIndexOf('}');
   return JSON.parse(s.slice(a, b + 1));
@@ -470,6 +472,22 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/mcp') { if (url.searchParams.get('refresh') === '1') await mcp.discover(); else await discovering; return json(res, 200, { ...mcp.summary(), tools: backend === 'claude-cli' }); }
     if (url.pathname === '/api/brain') return json(res, 200, graph);
     if (url.pathname === '/api/usage') return json(res, 200, await getUsage(url.searchParams.get('refresh') === '1')); // V3.6: the plan's gauge (never a 500: unavailable is an answer)
+    if (url.pathname === '/api/translate' && req.method === 'GET') { // V3.7: prefill the page's dictionary instantly
+      const lang = url.searchParams.get('lang');
+      const dict = lang === 'en' || isSupportedLang(lang) ? translator.dictionary(lang) : null;
+      if (dict === null) return json(res, 400, { error: 'unknown language' });
+      return json(res, 200, { lang, map: dict });
+    }
+    if (url.pathname === '/api/translate' && req.method === 'POST') {
+      const len = +req.headers['content-length'] || 0;
+      if (len > 200000) return json(res, 413, { error: 'payload too large' });
+      const b = await body(req);
+      if (b.lang !== 'en' && !isSupportedLang(b.lang)) return json(res, 400, { error: 'unknown language' });
+      if (!Array.isArray(b.texts)) return json(res, 400, { error: 'texts must be an array' });
+      const texts = b.texts.filter(s => typeof s === 'string').slice(0, 400);
+      const map = await translator.translate(b.lang, texts);
+      return json(res, 200, { lang: b.lang, map });
+    }
     if (url.pathname === '/api/tasks' && req.method === 'GET') return json(res, 200, load());
     if (url.pathname === '/api/routines' && req.method === 'GET') return json(res, 200, routinesOut());
     if (url.pathname === '/api/routines' && req.method === 'POST') {

@@ -1,0 +1,48 @@
+# Live UI translation (EN/ES)
+
+## Objective
+Let the owner switch the whole office UI between English and Spanish with an EN/ES toggle, without hand-extracting ~200 strings from `src/`, so future upstream releases translate themselves.
+
+## Problem / why
+There is no i18n mechanism. UI text lives in `src/shell.html` plus JS template strings across `src/*.js` and ~60 server sentences. Editing each string would conflict with every upstream `git pull`.
+
+## Approach
+A client-side live translator: a `MutationObserver` walks text nodes and `placeholder`/`title` attributes, swaps them from a cached dictionary, and batches unknown strings to a new server endpoint that asks Claude once and caches the result under `data/` (gitignored). Footprint in upstream files: one import in `src/main.js`, one route in `serve.mjs`.
+
+## Scope
+- In: page chrome, labels, buttons, hints, tooltips, feed/status lines, demo task titles, server messages as they appear on the page.
+- Out: user-typed content, agent deliverables and chat message bodies, brain note contents, input values, canvas-drawn text, agent output language (separate: a house-style skill).
+
+## Constraints
+- Write translations with `nodeValue`/`setAttribute` only; never `innerHTML`.
+- Never re-translate our own writes (loop guard); keep the original to restore EN.
+- Skip numbers, times, percentages, money, single symbols, and very long strings.
+- Batch and debounce requests; dedupe in-flight strings; cap batch size.
+- Demo mode (`file://`, no server): toggle hidden or inert, no errors.
+- Do not commit `dist/`, `src/braingraph.js` or `package-lock.json` (pre-existing local build artifacts; braingraph bakes the owner's brain).
+
+## TDD
+- Mode: strict, on. Source: user global CLAUDE.md ("Strict TDD Mode: enabled").
+- Runner: `node --test test/` (Node built-in; the repo had no unit runner, only `npm run check`).
+
+## Tasks
+- [x] T1 Server: `translate.mjs` (dictionary cache in `data/i18n/<lang>.json`, text filter, batching prompt, response validation) + `POST /api/translate` in `serve.mjs`, with unit tests. Route: delegated writer (2+ non-trivial files).
+- [ ] T2 Client: `src/i18n.js` (observer, text/attribute walker, exclusions, loop guard, debounce/batch, localStorage lang, EN/ES toggle in the top bar, `<html lang>`), wired from `src/main.js`, with unit tests for the pure parts; `npm run build`. Route: delegated writer.
+- [ ] T3 Docs: README section on the language toggle. Route: delegated writer.
+
+## Acceptance criteria
+- Toggling ES translates visible chrome within a few seconds on first use and instantly afterwards (cache hit); toggling EN restores the original text.
+- New text added by the app later is translated automatically.
+- Excluded areas stay untouched.
+- `node --test test/` green; `npm run check` shows no new failures (baseline: 2 known demo smoke failures, TEAM demo and a flaky command-bar demo; `/api/brain` empty while the brain has no notes).
+
+## Checks
+`node --test test/` · `npm run build` · `npm run check`
+
+## Progress
+- Branch `feat/live-translation` created from `main`.
+- RDD: off (global) — no native review.
+- T1 done (commit `<pending>`): `src/i18n-core.js` (pure `shouldTranslate`, `wrapTranslation`, `nextI18nState`) + `translate.mjs` (`createTranslator`, `validateTranslationResponse`, `isSupportedLang`) + `POST`/`GET /api/translate` wired in `serve.mjs`. `node --test test/i18n-core.test.mjs test/translate.test.mjs`: 25/25 green (11 + 14). Live smoke on `PORT=4599`: `POST /api/translate {lang:es, texts:["TASK STATUS","ADD","12:04"]}` → `{"12:04":"12:04","TASK STATUS":"ESTADO DE LA TAREA","ADD":"AGREGAR"}`, `GET /api/translate?lang=es` → cached dictionary; user's `:4520` server confirmed untouched throughout. Note: `node --test test/` (bare directory positional arg) fails on this Node build (v24.21.0) with a `MODULE_NOT_FOUND`-style error that looks like the directory is being `require`d instead of discovered by the test runner; `node --test` (default cwd discovery) and `node --test test/*.test.mjs` both run all 25 tests green — flagged for T3 verification.
+
+## Next step
+T2.
