@@ -57,6 +57,15 @@ test('loadConfig_codexLocalPortOverrideParticipatesInEffectiveCollisionValidatio
   assert.equal(validateOfficePair(claude, codex, 4519).ok, false);
 }));
 
+test('loadConfig_codexInvalidEnvironmentPortRemainsInvalidForValidation', () => temporary(root => {
+  const claude = loadConfig({ office: 'claude', env: {}, root });
+  const codex = loadConfig({ office: 'codex', env: { AO_CODEX_PORT: 'not-a-port' }, root });
+  assert.equal(Number.isNaN(codex.port), true);
+  const validation = validateOfficePair(claude, codex, 4519);
+  assert.equal(validation.ok, false);
+  assert.match(validation.errors.join(' '), /codex port must be an integer/i);
+}));
+
 test('loadConfig_codexDoesNotInheritClaudeCapabilities', () => temporary(root => {
   const claudeCapabilities = {
     mcp: { allow: ['claude.ai Gmail'], deny: ['example'], departments: { gmail: ['emails'] } },

@@ -46,7 +46,7 @@ export function loadConfig(options) {
   if (portOverride) c.port = paths?.port ?? Number(portOverride);
   if (office === 'claude' && env.AO_MODEL) c.model = env.AO_MODEL;
   if (office === 'codex' && env.AO_CODEX_MODEL) c.model = env.AO_CODEX_MODEL;
-  c.port = +c.port || (office === 'codex' ? 4521 : 4520);
+  c.port = office === 'codex' ? Number(c.port) : (+c.port || 4520);
   c.brainPath = path.resolve(root, c.brain);
   if (paths) Object.assign(c, { configPath: paths.configPath, dataRoot: paths.dataRoot, brainPath: path.resolve(root, c.brain), codexHome: paths.codexHome });
   return c;
