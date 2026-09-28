@@ -4,7 +4,7 @@
 
 Se implementaron `createCodexProvider` y la costura de tareas en `serve.mjs`. El adaptador inyectable consume el `runStreamed` documentado, fija `workingDirectory`, `model`, `sandboxMode` y `approvalPolicy`, persiste el `threadId` y el uso solo cuando aparecen en eventos reales, y reenvía únicamente eventos recibidos. Los modelos/herramientas quedan desconocidos (`null`) cuando el runtime no los enumera. Una política inválida o un cwd fuera del workspace queda bloqueado sin iniciar el SDK. Errores y aprobaciones no compatibles permanecen en la oficina Codex; no hay fallback a Claude.
 
-La Tarea queda **parcial**: el paquete `@openai/codex-sdk@0.157.1` no está instalado ni está disponible en la caché npm local. La actualización permitida `npm install --package-lock-only --offline --ignore-scripts --save-exact @openai/codex-sdk@0.157.1` falló con `ENOTCACHED` antes de modificar manifests. No se fabricaron cambios a `package.json`/`package-lock.json`; sin declarar y fijar la dependencia real no se afirma que el SDK pueda cargarse en producción. La casilla DO-03 sigue abierta.
+La tarea queda **completa**. Tras autorización explícita, `@openai/codex-sdk@0.157.1` se instaló desde registry npm público anónimo con scripts deshabilitados, se declaró como dependencia exacta y se generó un lock legítimo con URL e integridad del registry. El import del módulo verifica que el export `Codex` existe, sin instanciarlo, iniciar CLI/hilo ni llamar proveedor o auth.
 
 ## TDD
 
@@ -22,26 +22,29 @@ La Tarea queda **parcial**: el paquete `@openai/codex-sdk@0.157.1` no está inst
 - **RED — estado failed sin error:** un provider doble devolvió `{ status: 'failed', text: 'provider output', error: null }`; antes del arreglo la tarea persistía `approved: true` y escribía una nota.
 - **GREEN — éxito explícito:** para resultados que reportan estado de provider, el runtime solo ejecuta efectos de aprobación/notas con `providerStatus: 'completed'`; otros estados dejan `approved: false`, limpian `approvedAt` y no generan nota. Proveedores legacy sin estado reportado mantienen el flujo existente.
 - **Commit correctivo:** `2300a02` (`fix: require completed Codex approval result`).
+- **Instalación autorizada:** `npm install --save-exact --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org @openai/codex-sdk@0.157.1` — exit 0, 15 paquetes añadidos. `NPM_TOKEN` y `NODE_AUTH_TOKEN` se quitaron del entorno; user/global config se aisló sin leer archivos de configuración npm ni credenciales.
 
 ## Verificación observada
 
-- `node --test test/codex-provider.test.mjs test/office-server.test.mjs` — **23/23**, tras las correcciones independientes.
-- `node --test test/*.test.mjs` — **91/91**, tras las correcciones independientes.
+- `node --input-type=module -e ...` — manifest y lock coinciden en `0.157.1`, URL corresponde a `registry.npmjs.org`, lock contiene integridad.
+- `npm ls @openai/codex-sdk --depth=0 --offline --registry=https://registry.npmjs.org` — versión instalada `0.157.1`.
+- `node --input-type=module -e "import('@openai/codex-sdk')..."` — `Codex` exportado como función; no instancia cliente ni llama proveedor.
+- `node --test test/codex-provider.test.mjs test/office-server.test.mjs` — **23/23**.
+- `node --test test/*.test.mjs` — **91/91**.
 - Runtime harness `node --test test/codex-provider.test.mjs` — injected SDK double plus local HTTP/ephemeral port and temporary data/brain roots; **9/9** (covered by the observed combined run).
-- `npm install --package-lock-only --offline --ignore-scripts --save-exact @openai/codex-sdk@0.157.1` — **bloqueado por ENOTCACHED**; no instaló ni cambió manifests.
-- `git diff --check` — limpio antes del commit correctivo.
-- Build/check no ejecutados: la comprobación de servidor existente puede recorrer lógica de proveedor; build recompone artefactos generados fuera de este alcance. No se ejecutaron auth, `codex login status`, proveedores reales ni red.
+- `git diff --check` — limpio.
+- Build/check no ejecutados: la comprobación de servidor existente puede recorrer lógica de proveedor; build recompone artefactos generados fuera de este alcance. La dependencia se instaló por la única operación de red autorizada. No se ejecutaron auth, `codex login status`, proveedores reales ni se construyó el SDK.
 
 ## Alcance y preservación
 
-- Cambios limitados al adaptador, su prueba y `serve.mjs`; manifests intactos por falta de caché del paquete.
+- Cambios limitados al adaptador, su prueba, `serve.mjs`, `package.json` y `package-lock.json`; el paquete se obtuvo solo desde el registry público autorizado, sin scripts ni credenciales.
 - `serve.mjs` deriva el proveedor únicamente de la identidad de proceso. En Codex evita la ruta de router/teams/chat/traducción de Claude y no expone modelos/herramientas Claude en health/roster.
 - Los tests corrieron contra un SDK doble, HTTP local con puerto efímero y roots temporales; `d3-force` ausente usó el layout incorporado y no afectó los resultados.
 - No se leyeron credenciales ni se inició sesión o proveedor real.
 
 ## Próximo paso
 
-Resolver disponibilidad autorizada del paquete sin añadir un lock inventado; entonces declarar la dependencia con su lockfile válido, ejecutar las mismas verificaciones locales y cerrar DO-03 solo después de observar el resultado.
+DO-03 está cerrada en el tracker ODD tras observar dependencia fijada, import del SDK y pruebas locales. Quedan fuera de alcance autenticación, llamadas reales al proveedor, construcción del SDK y workflows de build/check potencialmente mutantes.
 
 ## Commit y rollback
 
