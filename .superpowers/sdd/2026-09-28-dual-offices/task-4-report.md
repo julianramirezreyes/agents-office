@@ -44,3 +44,12 @@ La revisión reprodujo cuatro clases de fallo: el launcher aceptaba health de ot
 - **Verificación focal:** `node --test test/launcher.test.mjs` — 13/13. **Combinada:** `node --test test/launcher.test.mjs test/office-paths.test.mjs test/office-server.test.mjs` — 36/36. **Suite:** `node --test test/*.test.mjs` — 104/104. `git diff --check` — limpio.
 - Sin puertos default ligados, procesos reales, provider/auth, instalaciones ni `check:live`; no se mataron procesos ajenos.
 - Commit de corrección: `351e60cc767dc68b9fc0b52ecc78234fb35f8c77` (`fix: harden launcher health and lifecycle`).
+
+## Seguimiento P1: error de spawn durante health en vuelo
+
+- **Hallazgo:** un evento `error` del child (por ejemplo, `spawn ENOENT`) marcaba la oficina como fallida, pero una respuesta `fetchHealth` pendiente podía volver a marcarla como `ready` y borrar la causa.
+- **RED:** se añadió `launcher_doesNotLetAnInFlightHealthProbeOverwriteChildSpawnError` con dobles de spawn/fetchHealth. `node --test test/launcher.test.mjs` falló en la aserción esperada: estado observado `ready`, esperado `failed`.
+- **GREEN:** el estado del handle propio retiene su primer fallo y las respuestas/capturas health posteriores se descartan cuando ese handle falla. Así `spawn ENOENT` permanece visible y no afecta la readiness de Codex.
+- **Verificación:** `node --test test/launcher.test.mjs` — 14/14; `node --test test/launcher.test.mjs test/office-paths.test.mjs test/office-server.test.mjs` — 37/37; `node --test test/*.test.mjs` — 105/105; `git diff --check` — limpio.
+- **Seguridad/harness:** solo dobles de child y health; no se lanzaron procesos reales ni proveedores, no se ligaron puertos default, no se inspeccionaron/mataron procesos ajenos y no se usaron credenciales/auth. Build omitido porque no se alteraron archivos generados; `check:live` omitido por instrucción.
+- **Commit:** `7209f1b6781a1f83c946c910faa17fa6f158ac17` (`fix: preserve launcher spawn errors across health checks`).
