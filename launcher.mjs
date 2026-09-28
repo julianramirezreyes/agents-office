@@ -9,6 +9,24 @@ import { resolveOfficePaths, validateOfficePair } from './office-paths.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOME = fs.readFileSync(path.join(HERE, 'home.html'), 'utf8');
 const OFFICES = ['claude', 'codex'];
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+function safeOfficeUrl(candidate, configuredUrl) {
+  if (candidate == null || candidate === '') return { url: configuredUrl };
+  let target, configured;
+  try {
+    target = new URL(candidate);
+    configured = new URL(configuredUrl);
+  } catch { return { error: 'Office health returned an invalid URL' }; }
+  if (!['http:', 'https:'].includes(target.protocol)
+    || target.username || target.password
+    || !LOCAL_HOSTS.has(target.hostname)
+    || target.origin !== configured.origin
+    || target.port !== configured.port) {
+    return { error: 'Office health returned an unsafe or inconsistent URL' };
+  }
+  return { url: target.href };
+}
 
 function response(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
@@ -55,18 +73,21 @@ export function createLauncher({
     claude: config.claude || resolveOfficePaths({ office: 'claude', env: officeEnv('claude', config.claudePort), root }),
     codex: config.codex || resolveOfficePaths({ office: 'codex', env: officeEnv('codex', config.codexPort), root }),
   };
+  const configuredUrls = Object.fromEntries(OFFICES.map(office => {
+    return [office, `http://127.0.0.1:${paths[office].port}`];
+  }));
   const officeState = Object.fromEntries(OFFICES.map(office => [office, {
     office,
     provider: office,
     status: 'starting',
-    url: `http://${host}:${paths[office].port}`,
+    url: configuredUrls[office],
     error: null,
-    health: null,
     pendingWork: null,
   }]));
   const children = new Map();
   let startPromise = null;
   let closePromise = null;
+  let isClosing = false;
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -79,13 +100,26 @@ export function createLauncher({
         const owned = children.get(office);
         if (!owned || owned.exit) return;
         try {
-          const health = await fetchHealth(state.url, office);
-          state.health = health;
-          state.pendingWork = Number(health?.pendingWork ?? health?.pendingTasks ?? 0) || 0;
-          state.url = health?.url || health?.baseUrl || state.url;
-          state.status = health?.ok === false ? 'failed' : 'ready';
-          state.error = health?.ok === false ? (health.error || 'Office health reported not ready') : null;
+          const health = await fetchHealth(configuredUrls[office], office);
+          if (children.get(office) !== owned || owned.exit) return;
+          if (health?.office !== office || health?.provider !== office) {
+            state.status = 'failed';
+            state.error = 'Office health identity does not match the launched office';
+            return;
+          }
+          const effective = safeOfficeUrl(health.url || health.baseUrl, configuredUrls[office]);
+          if (effective.error) {
+            state.status = 'failed';
+            state.error = effective.error;
+            return;
+          }
+          state.url = effective.url;
+          const pendingWork = Number(health.pendingWork ?? health.pendingTasks);
+          state.pendingWork = Number.isSafeInteger(pendingWork) && pendingWork >= 0 ? pendingWork : null;
+          state.status = health.ok === true ? 'ready' : 'failed';
+          state.error = health.ok === true ? null : (health.error || 'Office health did not report ready');
         } catch (error) {
+          if (children.get(office) !== owned || owned.exit) return;
           state.status = 'failed';
           state.error = String(error?.message || error);
         }
@@ -96,8 +130,10 @@ export function createLauncher({
   });
 
   async function start() {
+    if (isClosing || closePromise) throw new Error('Launcher is closing or already closed');
     if (startPromise) return startPromise;
     startPromise = (async () => {
+      if (!LOCAL_HOSTS.has(host)) throw new Error('Launcher host must be a loopback address');
       const validation = validateOfficePair(paths.claude, paths.codex, launcherPort);
       if (!validation.ok) throw new Error(`Invalid launcher configuration: ${validation.errors.join('; ')}`);
       if (!OFFICES.includes('claude') || !OFFICES.includes('codex')) throw new Error('Both offices are required');
@@ -144,7 +180,11 @@ export function createLauncher({
 
   async function close({ graceMs: requestedGrace = graceMs } = {}) {
     if (closePromise) return closePromise;
+    isClosing = true;
     closePromise = (async () => {
+      if (startPromise) {
+        try { await startPromise; } catch { /* a failed start may still have an owned listener/child to close */ }
+      }
       const deadlineMs = Math.max(0, Number(requestedGrace) || 0);
       const stopServer = server.listening
         ? new Promise(resolve => server.close(resolve))

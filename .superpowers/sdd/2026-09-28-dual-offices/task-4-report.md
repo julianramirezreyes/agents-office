@@ -34,3 +34,13 @@ Commit de unidad: `ec9a846130bd98668b6eab9b45ffcf869d040341` (`feat: launch and 
 ## Resolución de skills
 
 `paths-injected`: leídos los archivos exactos de TDD, work-unit-commits y verification-before-completion indicados en el encargo. No se usaron subagentes.
+
+## Corrección por revisión independiente
+
+La revisión reprodujo cuatro clases de fallo: el launcher aceptaba health de otro office/provider y copiaba `health.url` sin validar al href; un fetch en vuelo podía ocultar una salida de child; `close()` concurrente con `start()` podía retornar dejando el listener y dos children vivos; una URL efectiva de navegación alteraba la URL del siguiente probe.
+
+- **RED:** se añadieron repros con `fetchHealth`/spawn dobles. Cinco casos fallaron contra el baseline: identidad no validada, `javascript:` aceptado, probe atrasado sobreescribiendo fallo, cierre concurrente incompleto y base de probe contaminada por navegación. El run se interrumpió después de confirmar que el repro de lifecycle dejaba el listener abierto. Después fallaron repros para payload sin `ok: true` y bind wildcard de home antes de sus fixes.
+- **GREEN:** identidad debe coincidir en `office` y `provider`, y health debe tener `ok: true`. URL de navegación requiere HTTP(S), sin user/password, loopback y mismo origin/port configurado; payload inválido no reemplaza destino local seguro. Bind del home también debe ser loopback, y office probes quedan fijados a `127.0.0.1` incluso si se configura el host de escucha del home. Tradeoff: se rechazan URLs runtime aunque sean locales si alteran origen/puerto, evitando navegación cross-origin o a otro servicio; se conserva fallback local seguro y la oficina no se declara ready. El probe usa una base inmutable separada. Se descartan resultados asíncronos tras `exit`; `close()` bloquea nuevos starts y espera un start en curso antes de cerrar listener y children propios.
+- **Verificación focal:** `node --test test/launcher.test.mjs` — 13/13. **Combinada:** `node --test test/launcher.test.mjs test/office-paths.test.mjs test/office-server.test.mjs` — 36/36. **Suite:** `node --test test/*.test.mjs` — 104/104. `git diff --check` — limpio.
+- Sin puertos default ligados, procesos reales, provider/auth, instalaciones ni `check:live`; no se mataron procesos ajenos.
+- Commit de corrección: pendiente. El hash se registra en este informe en un commit documental separado.

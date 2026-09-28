@@ -54,7 +54,7 @@ test('launcher_startsBothOfficesWithProviderSpecificEnvironment', async () => {
   const children = [];
   const { base } = await startLauncher(config, {
     spawnProcess: (...args) => { spawned.push(args); const child = new Child(); children.push(child); return child; },
-    fetchHealth: async url => ({ ok: true, office: url.includes('4520') ? 'claude' : 'codex', url: `${url}/effective` }),
+    fetchHealth: async url => ({ ok: true, office: url.includes('4520') ? 'claude' : 'codex', provider: url.includes('4520') ? 'claude' : 'codex', url: `${url}/effective` }),
   });
 
   assert.equal(spawned.length, 2);
@@ -80,7 +80,7 @@ test('launcher_healthIsIndependentWhenOneChildFails', async () => {
     spawnProcess: () => new Child(),
     fetchHealth: async url => {
       if (url.includes('4521')) throw new Error('Codex did not answer health');
-      return { ok: true, office: 'claude' };
+      return { ok: true, office: 'claude', provider: 'claude' };
     },
   });
 
@@ -88,6 +88,143 @@ test('launcher_healthIsIndependentWhenOneChildFails', async () => {
   assert.equal(health.offices.claude.status, 'ready');
   assert.equal(health.offices.codex.status, 'failed');
   assert.match(health.offices.codex.error, /did not answer/);
+});
+
+test('launcher_rejectsHealthForTheWrongOfficeIdentity', async () => {
+  const config = await fixture();
+  let mismatch = 'office';
+  const { base } = await startLauncher(config, {
+    spawnProcess: () => new Child(),
+    fetchHealth: async (url, office) => office === 'claude'
+      ? mismatch === 'office'
+        ? { ok: true, office: 'codex', provider: 'claude', url }
+        : { ok: true, office: 'claude', provider: 'codex', url }
+      : { ok: true, office: 'codex', provider: 'codex', url },
+  });
+
+  for (const expected of ['office', 'provider']) {
+    mismatch = expected;
+    const health = await fetch(`${base}/api/health`).then(response => response.json());
+    assert.equal(health.offices.claude.status, 'failed');
+    assert.match(health.offices.claude.error, /identity/i);
+    assert.equal(health.offices.codex.status, 'ready');
+  }
+});
+
+test('launcher_rejectsUnsafeEffectiveUrlBeforeMarkingOfficeReady', async () => {
+  const config = await fixture();
+  let candidate = 'javascript:alert(1)';
+  const { base } = await startLauncher(config, {
+    spawnProcess: () => new Child(),
+    fetchHealth: async (_url, office) => ({ ok: true, office, provider: office, url: candidate }),
+  });
+
+  for (candidate of [
+    'javascript:alert(1)',
+    'http://user:secret@127.0.0.1:4520/',
+    'http://attacker.example:4520/',
+    'http://127.0.0.1:9999/',
+  ]) {
+    const health = await fetch(`${base}/api/health`).then(response => response.json());
+    assert.equal(health.offices.claude.status, 'failed');
+    assert.match(health.offices.claude.error, /url/i);
+    assert.equal(health.offices.claude.url, 'http://127.0.0.1:4520');
+    assert.equal(JSON.stringify(health).includes(candidate), false);
+  }
+});
+
+test('launcher_requiresAnExplicitSuccessfulHealthSignal', async () => {
+  const config = await fixture();
+  const { base } = await startLauncher(config, {
+    spawnProcess: () => new Child(),
+    fetchHealth: async (_url, office) => ({ office, provider: office }),
+  });
+
+  const health = await fetch(`${base}/api/health`).then(response => response.json());
+  assert.equal(health.offices.claude.status, 'failed');
+  assert.match(health.offices.claude.error, /not report ready/i);
+});
+
+test('launcher_doesNotLetAnInFlightHealthProbeOverwriteChildExit', async () => {
+  const config = await fixture();
+  const children = [];
+  let releaseClaudeProbe;
+  let startedClaudeProbe;
+  const claudeProbeStarted = new Promise(resolve => { startedClaudeProbe = resolve; });
+  const claudeProbe = new Promise(resolve => { releaseClaudeProbe = resolve; });
+  const { base } = await startLauncher(config, {
+    spawnProcess: () => { const child = new Child(); children.push(child); return child; },
+    fetchHealth: async url => {
+      if (url.endsWith(':4520')) { startedClaudeProbe(); return claudeProbe; }
+      return { ok: true, office: 'codex', provider: 'codex' };
+    },
+  });
+
+  const responsePromise = fetch(`${base}/api/health`).then(response => response.json());
+  await claudeProbeStarted;
+  children[0].emit('exit', 1, null);
+  releaseClaudeProbe({ ok: true, office: 'claude', provider: 'claude' });
+  const health = await responsePromise;
+  assert.equal(health.offices.claude.status, 'failed');
+  assert.match(health.offices.claude.error, /exited unexpectedly/i);
+  assert.equal(health.offices.codex.status, 'ready');
+});
+
+test('launcher_closeWaitsForConcurrentStartAndStopsItsOwnedChildren', async () => {
+  const config = await fixture();
+  const children = [];
+  const launcher = createLauncher({
+    config,
+    spawnProcess: () => { const child = new Child(); children.push(child); return child; },
+    fetchHealth: async url => ({ ok: true, office: url.includes('4520') ? 'claude' : 'codex', provider: url.includes('4520') ? 'claude' : 'codex' }),
+  });
+  launchers.push(launcher);
+
+  const starting = launcher.start();
+  const closing = launcher.close({ graceMs: 0 });
+  await Promise.all([starting, closing]);
+
+  assert.equal(launcher.server.listening, false);
+  assert.equal(children.length, 2);
+  assert.deepEqual(children.map(child => child.signals), [['SIGTERM'], ['SIGTERM']]);
+  await assert.rejects(launcher.start(), /closing|closed/);
+});
+
+test('launcher_keepsConfiguredHealthProbeUrlAfterRuntimeNavigationUrlChanges', async () => {
+  const config = await fixture();
+  const probed = [];
+  const { base } = await startLauncher(config, {
+    spawnProcess: () => new Child(),
+    fetchHealth: async (url, office) => {
+      probed.push({ url, office });
+      return { ok: true, office, provider: office, url: `${url}/effective` };
+    },
+  });
+
+  await fetch(`${base}/api/health`);
+  await fetch(`${base}/api/health`);
+
+  assert.deepEqual(probed, [
+    { url: 'http://127.0.0.1:4520', office: 'claude' },
+    { url: 'http://127.0.0.1:4521', office: 'codex' },
+    { url: 'http://127.0.0.1:4520', office: 'claude' },
+    { url: 'http://127.0.0.1:4521', office: 'codex' },
+  ]);
+});
+
+test('launcher_refusesNonLoopbackHomeBindBeforeSpawning', async () => {
+  const config = await fixture({ host: '0.0.0.0' });
+  let spawns = 0;
+  const launcher = createLauncher({
+    config,
+    spawnProcess: () => { spawns++; return new Child(); },
+  });
+  launchers.push(launcher);
+
+  await assert.rejects(launcher.start(), /loopback/i);
+
+  assert.equal(spawns, 0);
+  assert.equal(launcher.server.listening, false);
 });
 
 test('launcher_reportsPortCollisionWithoutReassigningState', async () => {
@@ -119,7 +256,7 @@ test('launcher_gracefullyStopsOwnedChildrenAndPreservesUnfinishedTask', async ()
   const children = [];
   const { launcher } = await startLauncher(config, {
     spawnProcess: () => { const child = new Child(); children.push(child); return child; },
-    fetchHealth: async () => ({ ok: true, pendingWork: 1 }),
+    fetchHealth: async (_url, office) => ({ ok: true, office, provider: office, pendingWork: 1 }),
   });
   await fetch(`http://${config.host}:${launcher.server.address().port}/api/health`);
 
