@@ -38,6 +38,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { loadConfig, ROOT } from './config.mjs';
 import { layoutGraph, readVault, readOfficeNotes } from './graph-build.mjs';
@@ -54,11 +55,14 @@ import { normModel, modelFor, modelArgs, modelId, modelName, MODEL_KEYS, DEFAULT
 import { parseWhen, describe, valid as validWhen, untilText } from './src/when.js';
 import { createTranslator, isSupportedLang } from './translate.mjs'; // V3.7: live UI translation (EN/ES)
 
-const cfg = loadConfig();
+export async function createOfficeRuntime({ officeConfig, provider, dataRoot, brainPath } = {}) {
+const cfg = officeConfig || loadConfig();
+const OFFICE = cfg.office || 'claude';
+const PROVIDER = (typeof provider === 'string' ? provider : provider?.id) || cfg.provider || 'claude';
 const HTML = path.join(ROOT, 'dist', 'command-centre-v2.html'); // built by build.mjs; shipped so npm start works without a build
-const DATA = path.join(ROOT, 'data');
+const DATA = path.resolve(dataRoot || cfg.dataRoot || path.join(ROOT, 'data'));
 const FILE = path.join(DATA, 'tasks.json');
-const BRAIN = cfg.brainPath;
+const BRAIN = path.resolve(brainPath || cfg.brainPath);
 const NOTES_DIR = path.join(BRAIN, 'Agents Office');
 const CLI_CWD = path.join(os.tmpdir(), 'agents-office-cli'); // an empty cwd: no CLAUDE.md, no repo context
 const version = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { return '?'; } })();
@@ -84,7 +88,7 @@ const leadOf = dept => AGENTS.find(a => a.department === dept && a.lead) || AGEN
 const setupMap = () => Object.fromEntries(DEPT_KEYS.map(k => [k, onboard.isSetUp(AGENTS, skills, k)]));
 
 let backend = 'claude-cli', sdk = null;
-if (process.env.ANTHROPIC_API_KEY) {
+if (!provider && process.env.ANTHROPIC_API_KEY) {
   try {
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
     sdk = new Anthropic(); backend = 'anthropic-sdk';
@@ -120,6 +124,7 @@ function ranOn(mu, want) {
   return keys.find(k => k.includes(fam)) || keys.filter(k => !/haiku/.test(k)).sort((a, b) => (mu[b].outputTokens || 0) - (mu[a].outputTokens || 0))[0] || keys[0];
 }
 async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RUN_TIMEOUT, model = cfg.model, effort = null } = {}) { // model: sonnet · opus · fable · effort: low…max or null = the model's own (src/models.js)
+  if (PROVIDER !== 'claude') throw new Error(`Provider "${PROVIDER}" is not available in this server runtime`);
   if (sdk) {
     const res = await sdk.messages.create({ model: modelId(model), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] });
     if (res.stop_reason === 'refusal') throw new Error('Claude declined this request');
@@ -450,21 +455,24 @@ async function routinesChat(a, text) {
 
 /* ---------- http ---------- */
 const json = (res, code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
-const body = req => new Promise((resolve, reject) => { let s = ''; req.on('data', d => { s += d; }); req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch (e) { reject(e); } }); });
+const body = req => new Promise((resolve, reject) => { let s = ''; req.on('data', d => { s += d; }); req.on('end', () => { try { const parsed = s ? JSON.parse(s) : {}; if (Object.hasOwn(parsed, 'office')) return reject(Object.assign(new Error('office identity is fixed by this server process'), { statusCode: 400 })); resolve(parsed); } catch (e) { reject(e); } }); });
 
-await rebuildGraph();
-const discovering = mcp.discover().then(l => { console.log(`  connectors: ${l.filter(s => s.status === 'connected').length} connected of ${l.length} (claude mcp list)`); return l; });
+let discovering = Promise.resolve([]);
 const agentsOut = () => { const setup = setupMap(); return AGENTS.map(a => ({ id: a.id, name: a.name, role: a.role, does: a.does, tools: a.tools, brief: a.brief || '', model: a.model || '', effort: a.effort || '', skills: skills.names(a), lessons: learn.count(BRAIN, a.id), department: a.department, lead: a.lead,
   interviewer: leadOf(a.department).id === a.id, setUp: setup[a.department] })); };
+let closing = false;
+let routineTimer = null;
 const server = http.createServer(async (req, res) => {
+  if (closing) return json(res, 503, { error: 'office server is shutting down' });
   const url = new URL(req.url, 'http://x');
+  if (url.searchParams.has('office')) return json(res, 400, { error: 'office identity is fixed by this server process' });
   try {
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/command-centre-v2.html' || url.pathname === '/dark')) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       const page = fs.readFileSync(HTML, 'utf8');
       return res.end(url.pathname === '/dark' ? page.replace('<body>', '<body class="dark">') : page); // /dark: the same file, opened in dark mode
     }
-    if (url.pathname === '/api/health') return json(res, 200, { ok: true, version, backend, model: cfg.model, modelName: modelName(cfg.model), models: MODEL_KEYS, effort: cfg.effort || '', efforts: EFFORT_KEYS, name: cfg.name, brain: BRAIN, notes: graph.notes, depts: DEPT_KEYS,
+    if (url.pathname === '/api/health') return json(res, 200, { ok: true, office: OFFICE, provider: PROVIDER, version, backend, model: cfg.model, modelName: modelName(cfg.model), models: MODEL_KEYS, effort: cfg.effort || '', efforts: EFFORT_KEYS, name: cfg.name, brain: BRAIN, notes: graph.notes, depts: DEPT_KEYS,
       agents: agentsOut(), setup: setupMap(), routines: (l => ({ count: l.length, paused: l.filter(r => r.paused).length, depts: routines.ALLOWED }))(loadRoutines()), roster: { customised: roster.customised, briefed: roster.briefed, files: roster.files, problems: roster.problems }, skills: (({ count, shipped, brain, problems }) => ({ count, shipped, brain, problems }))(skills.summary()), tools: backend === 'claude-cli', mcp: mcp.summary(), teams: TEAMS, browser: mcp.summary().browser });
     if (url.pathname === '/api/agents') return json(res, 200, { agents: agentsOut(), problems: roster.problems, files: roster.files });
     if (url.pathname === '/api/skills') return json(res, 200, refreshSkills().summary()); // reloads from disk: edit a skill, hit this, see it
@@ -584,19 +592,58 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ...r, interview: false });
     }
     json(res, 404, { error: 'not found' });
-  } catch (e) { console.error(e); json(res, 500, { error: e.message }); }
+  } catch (e) { if (e.statusCode === 400) return json(res, 400, { error: e.message }); console.error(e); json(res, 500, { error: e.message }); }
 });
-server.listen(cfg.port, () => {
+async function start() {
+  if (server.listening) return server.address();
+  await rebuildGraph();
+  // Test doubles and non-Claude offices must never probe the local Claude CLI.
+  if (!provider && PROVIDER === 'claude') discovering = mcp.discover().then(l => { console.log(`  connectors: ${l.filter(s => s.status === 'connected').length} connected of ${l.length} (claude mcp list)`); return l; });
+  await new Promise((resolve, reject) => {
+    const onError = error => { server.off('listening', onListening); reject(error); };
+    const onListening = () => { server.off('error', onError); resolve(); };
+    server.once('error', onError); server.once('listening', onListening); server.listen(cfg.port);
+  });
+  const address = server.address();
   console.log(`Agents Office ${version} → http://localhost:${cfg.port}`);
   console.log(`  business: ${cfg.name}   brain: ${BRAIN} (${graph.notes} notes, ${graph.links.length} links)   claude: ${backend} · ${modelName(cfg.model)}${cfg.effort ? ' · effort ' + cfg.effort : ''} by default (routing on Sonnet)`);
-  getUsage(true).then(u => console.log(u.source === 'claude' ? `  usage: session ${u.session?.percent ?? '—'}% · week ${u.week?.percent ?? '—'}% (your Claude plan, as Claude Code shows it)` : `  usage: Claude's gauge unavailable (${u.reason}) — showing the office's own count`)).catch(() => {});
+  if (!provider) getUsage(true).then(u => console.log(u.source === 'claude' ? `  usage: session ${u.session?.percent ?? '—'}% · week ${u.week?.percent ?? '—'}% (your Claude plan, as Claude Code shows it)` : `  usage: Claude's gauge unavailable (${u.reason}) — showing the office's own count`)).catch(() => {});
   console.log(`  tasks: ${FILE}   notes the agents write: ${NOTES_DIR}`);
   const rl = loadRoutines(); const nx = rl.filter(r => !r.paused && r.nextAt).sort((a, b) => a.nextAt - b.nextAt)[0];
   console.log(`  routines: ${rl.length} loaded${rl.some(r => r.paused) ? ' (' + rl.filter(r => r.paused).length + ' paused)' : ''}${nx ? ' · next ' + untilText(nx.nextAt) + ' ' + nx.title.toUpperCase() + ' (' + nx.agent + ')' : ''} · ${rlist.path}`);
-  setInterval(tickRoutines, 20000); tickRoutines(); // the clock: every 20 s; the first tick catches up anything missed while the office was off (once, marked LATE)
+  routineTimer = setInterval(tickRoutines, 20000); tickRoutines(); // the clock: every 20 s; the first tick catches up anything missed while the office was off (once, marked LATE)
   console.log(`  agents: 35 (${roster.customised} customised${roster.briefed ? ', ' + roster.briefed + ' briefed' : ''}${roster.files.length ? ' via ' + roster.files.join(' + ') : ''})   tools: ${backend === 'claude-cli' ? 'connected MCP servers' + (cfg.tools?.web === false ? '' : ' + web') + (mcp.browserOn() ? ' + the owner\'s Chrome (' + (mcp.browserState().installed ? 'extension paired' + (mcp.browserState().device ? ': ' + mcp.browserState().device : '') : 'extension NOT paired — run `claude --chrome` once') + ')' : '') : 'none on the API backend'}`);
   console.log(`  teams: ${TEAMS.enabled ? 'on — TEAM in the bar or "as a team" in the sentence; the lead splits it across up to ' + TEAMS.max + ' desks' : 'off (teams.enabled in office.config.json)'}`);
   const sk = skills.summary(); const setup = setupMap(); const notYet = DEPT_KEYS.filter(k => !setup[k]);
   console.log(`  skills: ${sk.count} (${sk.shipped} shipped in skills/, ${sk.brain} in ${path.join(NOTES_DIR, 'skills')})${sk.problems.length ? '   ⚠ ' + sk.problems.length + ' problem' + (sk.problems.length > 1 ? 's' : '') + ' — see npm run check' : ''}`);
   console.log(`  set up: ${notYet.length === DEPT_KEYS.length ? 'no department yet — open a lead\'s chat and say "set up"' : notYet.length ? DEPT_KEYS.length - notYet.length + ' of 6 departments (not yet: ' + notYet.map(k => DEPTS[k].name).join(', ') + ')' : 'all six departments'}   lessons: ${learn.dir(BRAIN)}`);
-});
+  return address;
+}
+
+async function close({ graceMs = 5000 } = {}) {
+  if (!server.listening) return;
+  closing = true;
+  if (routineTimer) clearInterval(routineTimer);
+  const stopped = new Promise(resolve => server.close(resolve));
+  let graceTimer;
+  const timeout = new Promise(resolve => { graceTimer = setTimeout(() => {
+    server.closeAllConnections?.();
+    resolve();
+  }, Math.max(0, graceMs)); });
+  await Promise.race([stopped, timeout]);
+  clearTimeout(graceTimer);
+  await stopped;
+  // Task/routine mutations are synchronously persisted on each state transition.
+  save(load());
+}
+
+return { server, start, close };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const runtime = await createOfficeRuntime({ officeConfig: loadConfig() });
+  await runtime.start();
+  const stop = () => runtime.close().finally(() => process.exit(0));
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+}
