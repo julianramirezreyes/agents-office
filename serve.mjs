@@ -412,14 +412,15 @@ async function runServerTaskWork(id, { feedback, approve } = {}) {
   task.state = 'doing'; task.startedAt = Date.now(); delete task.ask; save(list);
   try {
     const out = await (taskRunner || run)(task, feedback, approve ? 'approve' : task.needsOk ? 'draft' : 'routine');
-    const approvalSucceeded = approve && !out.error && !['blocked', 'pending'].includes(out.providerStatus);
+    const providerDidNotComplete = Boolean(out.providerStatus && out.providerStatus !== 'completed');
+    const approvalSucceeded = approve && !out.error && !providerDidNotComplete;
     if (approvalSucceeded) { task.result = (task.draft || task.result) + '\n\n---\nAFTER YOUR OK\n' + out.result; task.approved = true; task.approvedAt = Date.now(); }
     else {
       task.result = out.result;
       if (approve) { task.approved = false; delete task.approvedAt; }
     }
     Object.assign(task, { read: out.read, tools: [...new Set([...(task.tools || []), ...(out.tools || [])])], used: [...new Set([...(task.used || []), ...(out.used || [])])], skills: out.skills, error: !!out.error, threadId: out.threadId, usage: out.usage, providerStatus: out.providerStatus, modelUsed: out.modelUsed, modelFrom: out.modelFrom, modelId: out.modelId, effortUsed: out.effortUsed, effortFrom: out.effortFrom, ...(out.team ? { team: out.team } : {}) });
-    if (out.error || ['blocked', 'pending'].includes(out.providerStatus)) { task.state = 'done'; task.doneAt = Date.now(); }
+    if (out.error || providerDidNotComplete) { task.state = 'done'; task.doneAt = Date.now(); }
     else if (task.needsOk && !approve) { task.state = 'waiting'; task.draft = out.result; task.waitingAt = Date.now(); task.ask = routines.askLine(task); }
     else { task.state = 'done'; task.doneAt = Date.now(); task.note = writeNote(task); await rebuildGraph(); }
   } catch (e) {

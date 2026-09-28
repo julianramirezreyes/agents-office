@@ -189,3 +189,42 @@ test('codexRuntime_doesNotMarkFailedCodexApprovalAsApproved', async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('codexRuntime_doesNotApproveOrWriteNoteWhenCodexFailsWithoutError', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-codex-failed-approval-'));
+  const dataRoot = path.join(root, 'data');
+  const brainPath = path.join(root, 'brain');
+  fs.mkdirSync(dataRoot, { recursive: true });
+  fs.mkdirSync(brainPath, { recursive: true });
+  const lead = loadRoster(brainPath, { office: 'codex' }).agents.find(agent => agent.department === 'emails' && agent.lead);
+  fs.writeFileSync(path.join(dataRoot, 'tasks.json'), JSON.stringify([{ id: 'failed-approval-task', dept: 'emails', agent: lead.id, title: 'Send report', text: 'Send the report', state: 'waiting', needsOk: true, draft: 'Draft report', addedAt: Date.now(), plan: [] }]));
+  const calls = [];
+  const runtime = await createOfficeRuntime({
+    officeConfig: { ...loadConfig(), office: 'codex', provider: 'codex', port: 0, dataRoot, brainPath },
+    provider: { id: 'codex', async runTask(input) { calls.push(input); return { status: 'failed', error: null, text: 'provider output', provider: 'codex' }; } },
+  });
+  try {
+    await runtime.start();
+    const base = `http://127.0.0.1:${runtime.server.address().port}`;
+    const response = await fetch(`${base}/api/tasks/failed-approval-task/approve`, { method: 'POST' });
+    assert.equal(response.status, 200);
+    for (let i = 0; i < 100; i++) {
+      const task = JSON.parse(fs.readFileSync(path.join(dataRoot, 'tasks.json'), 'utf8'))[0];
+      if (task.state === 'done') {
+        assert.equal(task.error, false);
+        assert.equal(task.providerStatus, 'failed');
+        assert.equal(task.approved, false);
+        assert.equal(task.approvedAt, undefined);
+        assert.equal(task.result, 'provider output');
+        assert.equal(task.note, undefined);
+        assert.equal(calls.length, 1);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.fail('Failed Codex approval attempt did not settle the task');
+  } finally {
+    await runtime.close({ graceMs: 100 });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
