@@ -37,6 +37,26 @@ test('loadConfig_withoutOptionsStillAcceptsLegacyAndClaudePortEnvironment', () =
   }
 });
 
+test('loadConfig_codexDoesNotInheritClaudeProviderDefaults', () => temporary(root => {
+  fs.writeFileSync(path.join(root, 'office.config.json'), JSON.stringify({ port: 4520, brain: './brain', model: 'sonnet' }));
+  const claude = loadConfig({ office: 'claude', env: {}, root });
+  const codex = loadConfig({ office: 'codex', env: {}, root });
+  assert.equal(codex.port, 4521);
+  assert.equal(codex.brainPath, path.join(root, 'brain-codex'));
+  assert.equal(codex.model, '');
+  assert.equal(codex.configPath, path.join(root, 'office.config.codex.local.json'));
+  assert.equal(codex.dataRoot, path.join(root, 'data-codex'));
+  assert.equal(validateOfficePair(claude, codex, 4519).ok, true);
+}));
+
+test('loadConfig_codexLocalPortOverrideParticipatesInEffectiveCollisionValidation', () => temporary(root => {
+  fs.writeFileSync(path.join(root, 'office.config.codex.local.json'), JSON.stringify({ port: 4520, brain: './brain-codex' }));
+  const claude = loadConfig({ office: 'claude', env: {}, root });
+  const codex = loadConfig({ office: 'codex', env: {}, root });
+  assert.equal(codex.port, 4520);
+  assert.equal(validateOfficePair(claude, codex, 4519).ok, false);
+}));
+
 test('resolveOfficePaths_usesSeparateCodexWritableRoots', () => temporary(root => {
   const claude = resolveOfficePaths({ office: 'claude', env: isolatedEnv({}), root });
   const codex = resolveOfficePaths({ office: 'codex', env: isolatedEnv({}), root });

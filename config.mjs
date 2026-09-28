@@ -22,7 +22,17 @@ export function loadConfig(options) {
   const paths = managed ? resolveOfficePaths({ office, env, root }) : undefined;
   const base = readJSON(path.join(root, 'office.config.json'));
   const local = readJSON(paths?.configPath || path.join(root, 'office.config.local.json'));
-  const c = { name: 'Agents Office', brain: office === 'codex' ? './brain-codex' : './brain', port: office === 'codex' ? 4521 : 4520, model: 'sonnet', ...base, ...local }; // V3.6: model = sonnet · opus · fable
+  const defaults = office === 'codex'
+    ? { name: 'Agents Office', brain: './brain-codex', port: 4521, model: '' }
+    : { name: 'Agents Office', brain: './brain', port: 4520, model: 'sonnet' };
+  const shared = { ...base };
+  if (office === 'codex') {
+    // The shipped config contains Claude-specific brain, port, and model defaults.
+    delete shared.brain;
+    delete shared.port;
+    delete shared.model;
+  }
+  const c = { ...defaults, ...shared, ...local }; // Claude-specific values require explicit Codex config in the Codex office.
   c.mcp = { allow: [], deny: [], departments: {}, ...(base.mcp || {}), ...(local.mcp || {}) };
   c.tools = { web: true, browser: true, ...(base.tools || {}), ...(local.tools || {}) }; // V3.2 (16 Sep): browser = Claude in Chrome
   c.teams = { enabled: true, max: 4, ...(base.teams || {}), ...(local.teams || {}) }; // V3.2 (16 Sep): Agent Teams
@@ -31,7 +41,8 @@ export function loadConfig(options) {
   if (brainOverride) c.brain = brainOverride;
   const portOverride = env[office === 'codex' ? 'AO_CODEX_PORT' : 'AO_CLAUDE_PORT'] || (office === 'claude' && env.PORT);
   if (portOverride) c.port = paths?.port ?? Number(portOverride);
-  if (env.AO_MODEL) c.model = env.AO_MODEL;
+  if (office === 'claude' && env.AO_MODEL) c.model = env.AO_MODEL;
+  if (office === 'codex' && env.AO_CODEX_MODEL) c.model = env.AO_CODEX_MODEL;
   c.port = +c.port || (office === 'codex' ? 4521 : 4520);
   c.brainPath = path.resolve(root, c.brain);
   if (paths) Object.assign(c, { configPath: paths.configPath, dataRoot: paths.dataRoot, brainPath: path.resolve(root, c.brain), codexHome: paths.codexHome });

@@ -70,7 +70,7 @@ Cada tarea corresponde a la tarea numerada equivalente del plan `docs/superpower
 
 ## Progreso y siguiente paso
 
-- Progreso: documento de recuperación creado antes de la primera edición de código. Baseline reportada: 56 pruebas pasan. `size:exception` aprobada. DO-01 implementada con RED → GREEN; suite actual 64/64. `npm run check` quedó en 19/22 por build sin `esbuild`, smoke sin `playwright-core` y fallo de arranque del servidor; `npm run build` confirma dependencia `esbuild` ausente. No se instalaron dependencias ni se invocaron proveedores. Commit de implementación DO-01: `03d8098326a33fec089d84644bce55439391d665`; revisión nativa pendiente del orquestador.
+- Progreso: documento de recuperación creado antes de la primera edición de código. Baseline reportada: 56 pruebas pasan. `size:exception` aprobada. DO-01 implementada con RED → GREEN; una revisión independiente encontró que la configuración efectiva Codex todavía heredaba `port`, `brain` y `model` de Claude; la corrección está cubierta con pruebas. Suite actual 66/66. `npm run check` quedó en 19/22 en la verificación anterior, por dependencias ambientales y fallo de arranque; `npm run build` vuelve a confirmar `esbuild` ausente. No se instalaron dependencias ni se invocaron proveedores/auth. Commit original DO-01: `03d8098326a33fec089d84644bce55439391d665`; commit de corrección pendiente de registrar tras crear; revisión nativa pendiente del orquestador.
 - Pendiente: continuar con DO-02 en el worktree aprobado. Antes de integrar con el checkout fuente, reconciliar sus cambios locales; no sobreescribirlos.
 
 ## Archivos de referencia
@@ -82,9 +82,9 @@ Cada tarea corresponde a la tarea numerada equivalente del plan `docs/superpower
 ## Evidencia de DO-01
 
 - **Ruta:** delegated direct; trigger: el cambio modifica `config.mjs`, añade el resolvedor y sus pruebas, y depende del mapa de configuración del proceso.
-- **TDD:** RED confirmó módulo `office-paths.mjs` ausente; una prueba posterior reprodujo `TypeError` en `loadConfig()` con `AO_CLAUDE_PORT`, corregido con compatibilidad de ruta legacy y verificado GREEN.
-- **Verificación:** `node --test test/office-paths.test.mjs` — 8/8; `node --test test/*.test.mjs` — 64/64; `git diff --check` — sin errores. `npm run check` — 19/22, bloqueado por `esbuild`, `playwright-core` ausente y servidor que no inicia; `npm run build` — no puede importar `esbuild` (`ERR_MODULE_NOT_FOUND`). No instalar dependencias por alcance explícito.
+- **TDD:** RED original confirmó módulo `office-paths.mjs` ausente; prueba previa capturó también `TypeError` por `AO_CLAUDE_PORT` sin opciones. Corrección del hallazgo P1: RED reprodujo `4520 !== 4521` al cargar Codex sobre `office.config.json` con valores Claude; GREEN elimina del merge Codex los defaults compartidos de `brain`, `port` y `model` y usa `4521`, `./brain-codex` y modelo sin fijar (`''`), salvo override explícito en configuración Codex. Codex ignora `AO_MODEL` de Claude; los overrides locales de Codex se mantienen y sus puertos efectivos participan en `validateOfficePair`.
+- **Verificación:** `node --test test/office-paths.test.mjs` — 10/10; `node --test test/*.test.mjs` — 66/66; `git diff --check` — sin errores. `npm run check` — 19/22 en la verificación anterior, bloqueado por `esbuild`, `playwright-core` ausente y servidor que no inicia; no se repitió para evitar cualquier ruta de auth/provider prohibida. `npm run build` (ejecución actual) — no puede importar `esbuild` (`ERR_MODULE_NOT_FOUND`). No instalar dependencias.
 - **Rollback:** revertir el commit de DO-01, que contiene solo resolución/configuración de rutas, ignore rules, pruebas y esta evidencia; no requiere revertir trabajo ajeno.
 - **Runtime harness:** N/A — unidad pura de resolución/validación de rutas, sin servidor ni proveedor.
-- **Commit de implementación:** `03d8098326a33fec089d84644bce55439391d665` (`feat: resolve isolated office state paths`).
+- **Commits:** `03d8098326a33fec089d84644bce55439391d665` (`feat: resolve isolated office state paths`) más commit de corrección P1 pendiente de crear.
 - **Revisión nativa:** pendiente del orquestador; no ejecutada por esta unidad.
