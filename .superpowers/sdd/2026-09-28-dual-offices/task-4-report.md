@@ -29,7 +29,7 @@ Las pruebas inyectan `spawnProcess` y `fetchHealth`; el home real del test utili
 
 Rollback: revertir el commit funcional DO-04 y luego el commit documental que registre su identidad. El rollback abarca `launcher.mjs`, `home.html`, `test/launcher.test.mjs`, cambios de DO-04 en `office-paths.mjs`/`serve.mjs` y los registros DO-04 de ODD/este informe; no toca datos ni archivos locales de Claude.
 
-Commits: pendientes de creación/registro.
+Commit de unidad: `ec9a846130bd98668b6eab9b45ffcf869d040341` (`feat: launch and supervise isolated offices`). La actualización documental que registra esta identidad va en un commit separado.
 
 ## Resolución de skills
 
