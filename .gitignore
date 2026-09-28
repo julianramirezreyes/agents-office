@@ -2,8 +2,11 @@ node_modules/
 dist/*
 !dist/command-centre-v2.html
 data/
+data-codex/
 office.config.local.json
+office.config.codex.local.json
 office.agents.local.json
 brain/Agents Office/
+brain-codex/
 .DS_Store
 *.backup-*
