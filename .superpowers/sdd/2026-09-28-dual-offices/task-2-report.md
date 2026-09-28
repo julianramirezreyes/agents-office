@@ -8,19 +8,22 @@ Se extrajo `createOfficeRuntime({ officeConfig, provider, dataRoot, brainPath })
 
 Tasks, rutinas, uso, entrevistas y traducciones derivan su persistencia de `dataRoot`; notas, feedback, brain, roster personalizado y skills personalizados usan `brainPath`. CodeGraph indicó que el roster también cargaba el archivo global `office.agents.json`; por ello Codex ahora consulta solo el roster de su brain aislado. Claude conserva el orden y las fuentes existentes. Los assets de `skills/` compartidos permanecen como entradas distribuidas de solo lectura.
 
-El apagado marca el servidor como cerrándose, detiene el scheduler, deja de aceptar solicitudes, espera el cierre HTTP con un plazo acotado y persiste el último `tasks.json`. Si un proveedor distinto de Claude alcanza el camino Claude antes de que exista su adaptador, la operación falla explícitamente; no se hace fallback a Claude.
+El apagado marca el servidor como cerrándose, detiene el scheduler y deja de aceptar solicitudes. Espera trabajos activos hasta `graceMs`; al vencer, cierra sockets HTTP pendientes, retorna el conteo de tareas activas y las deja completar/persistir de forma natural. El entrypoint no usa `process.exit`. Si un proveedor distinto de Claude alcanza el camino Claude antes de que exista su adaptador, la operación falla explícitamente; no se hace fallback a Claude.
 
 ## TDD
 
 - **RED inicial:** `node --test test/office-server.test.mjs` falló con `SyntaxError`: el módulo aún no exportaba `createOfficeRuntime`.
 - **RED de aislamiento del roster:** `node --test --test-name-pattern='codexRoster_usesOnlyItsIsolatedBrainCustomization' test/office-server.test.mjs` falló porque el roster Codex incluía `office.agents.json` además de la personalización en su brain.
 - **GREEN:** el test del roster pasó `1/1` después del cambio. La prueba enfocada final pasó `7/7`.
-- Los tests HTTP usan puertos efímeros (`port: 0`) y raíces temporales. Cubren identidad/proveedor, separación de lectura y escritura de tareas entre A/B, rechazo de identidad proporcionada por el cliente, health, apagado/persistencia y continuidad de defaults Claude.
+- RED de fuga Claude: al forzar temporalmente `health` a anunciar el backend Claude, `codexRuntime_neverCallsClaudeUsageOrMcpAndDoesNotAdvertiseClaude` falló al detectar `backend: claude-cli`.
+- RED de shutdown: `officeRuntime_closeReportsPendingDetachedTaskAndLetsItPersistAfterGrace` falló con el lifecycle anterior, que no devolvía `{ drained, pendingWork }`; el test prueba que el trabajo in-flight termina y persiste tras expirar el plazo.
+- RED del entrypoint: el test falló primero porque `attachShutdownHandlers` aún no existía; tras implementarlo, verifica que `SIGTERM` no llame `process.exit` y registre trabajo pendiente.
+- Los tests HTTP usan puertos efímeros (`port: 0`) y raíces temporales. Cubren identidad/proveedor, separación de lectura y escritura de tareas entre A/B, rechazo de identidad proporcionada por el cliente, health, no invocación de usage/MCP Claude, apagado/persistencia y continuidad de defaults Claude.
 
 ## Verificación
 
-- `node --test test/office-server.test.mjs` — **7/7 pasan**.
-- `node --test test/*.test.mjs` — **75/75 pasan**.
+- `node --test test/office-server.test.mjs` — **10/10 pasan**.
+- `node --test test/*.test.mjs` — **78/78 pasan**.
 - `git diff --check` — **sin errores**.
 - `npm run build` — omitido deliberadamente: `build.mjs` regenera `src/braingraph.js` desde el brain del workspace y escribe `dist/*`; no era un check seguro/no mutante para este alcance.
 - `npm run check` — omitido deliberadamente porque ejecuta un smoke server y el alcance prohíbe invocar lógica de proveedor/auth. No se usó `npm run check:live`.
@@ -38,9 +41,20 @@ El apagado marca el servidor como cerrándose, detiene el scheduler, deja de ace
 
 - `58c6a976990118a4c70954db81a79d1bab33aa94` — `refactor: isolate office server runtime state`
 - `52e8b9a26a55a2e217874dc5d8a4b223fffb2419` — `fix: isolate Codex roster customizations`
-- Rollback: revertir ambos commits; no requiere cambios a launcher, UI, SDK Codex ni datos del checkout fuente.
+- Commits correctivos se consignan en la sección de seguimiento.
+- Rollback: revertir los commits DO-02 en orden inverso; no requiere cambios a launcher, UI, SDK Codex ni datos del checkout fuente.
 
 ## Handoff
 
 - **Siguiente tarea:** DO-03 — adaptar proveedor Codex con doble inyectable, sin leer credenciales ni usar proveedor real.
 - **skill_resolution:** `paths-injected` — TDD, work-unit-commits y verification-before-completion fueron leídos desde sus rutas instruidas.
+
+## Seguimiento de revisión DO-02
+
+- **Causa P1:** endpoints `/api/usage` y `/api/mcp` ejecutaban servicios Claude sin verificar el proveedor; health publicaba modelo, herramientas, Chrome y equipos Claude. `PROVIDER` también caía a `claude` cuando `office: codex` no inyectaba un proveedor.
+- **Corrección P1:** el proveedor por omisión deriva de la oficina; Codex no crea SDK Anthropic, ni ejecuta uso/MCP, ni expone capacidades Claude en health. Health anuncia `backend: codex`, modelo nulo, listas de modelos vacías, herramientas/equipos desactivados y resumen MCP vacío. Las inyecciones de test espían llamadas y bloquean lecturas de credenciales.
+- **Causa P2:** `close()` sólo esperaba conexiones; el entrypoint terminaba con `process.exit(0)`, pudiendo matar tareas detached antes de guardar su resultado.
+- **Corrección P2:** `close({graceMs})` deja de aceptar requests, detiene rutinas, espera promesas activas; al vencer cierra sockets HTTP y devuelve `{ drained, pendingWork }`. Las tareas no se cancelan y persisten cuando terminan. `attachShutdownHandlers` informa el conteo pendiente y permite que Node salga naturalmente, sin `process.exit`; el caso Claude idle conserva cierre natural.
+- **GREEN:** `node --test test/office-server.test.mjs` — 10/10; `node --test test/*.test.mjs` — 78/78; `git diff --check` — limpio.
+- **Límites ambientales:** `graph-build` informó que `d3-force` no está instalado y usó layout incorporado. No se ejecutaron proveedores/auth, `npm run check:live`, instalaciones ni red. Build/smoke siguen omitidos por los motivos arriba descritos.
+- **Hash evidencia código/tests:** `serve.mjs` `7a2593a3963ce5a713029137f1d5b598f3f42ab443bbf9e87b9284a015b14485`; `test/office-server.test.mjs` `4b30729769797f961ef8051a6639238f3b60e1b929034fa483e6ca78afe2f181`.
