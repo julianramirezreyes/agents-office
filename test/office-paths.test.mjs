@@ -57,6 +57,23 @@ test('loadConfig_codexLocalPortOverrideParticipatesInEffectiveCollisionValidatio
   assert.equal(validateOfficePair(claude, codex, 4519).ok, false);
 }));
 
+test('loadConfig_codexDoesNotInheritClaudeCapabilities', () => temporary(root => {
+  const claudeCapabilities = {
+    mcp: { allow: ['claude.ai Gmail'], deny: ['example'], departments: { gmail: ['emails'] } },
+    tools: { web: true, browser: true }, teams: { enabled: true, max: 4 },
+  };
+  fs.writeFileSync(path.join(root, 'office.config.json'), JSON.stringify(claudeCapabilities));
+  fs.writeFileSync(path.join(root, 'office.config.codex.local.json'), JSON.stringify(claudeCapabilities));
+  const claude = loadConfig({ office: 'claude', env: {}, root });
+  const codex = loadConfig({ office: 'codex', env: {}, root });
+  assert.deepEqual(claude.mcp.allow, ['claude.ai Gmail']);
+  assert.equal(claude.tools.browser, true);
+  assert.equal(claude.teams.enabled, true);
+  assert.deepEqual(codex.mcp, { allow: [], deny: [], departments: {} });
+  assert.deepEqual(codex.tools, { web: false, browser: false });
+  assert.deepEqual(codex.teams, { enabled: false, max: 0 });
+}));
+
 test('resolveOfficePaths_usesSeparateCodexWritableRoots', () => temporary(root => {
   const claude = resolveOfficePaths({ office: 'claude', env: isolatedEnv({}), root });
   const codex = resolveOfficePaths({ office: 'codex', env: isolatedEnv({}), root });

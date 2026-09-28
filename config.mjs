@@ -26,16 +26,19 @@ export function loadConfig(options) {
     ? { name: 'Agents Office', brain: './brain-codex', port: 4521, model: '' }
     : { name: 'Agents Office', brain: './brain', port: 4520, model: 'sonnet' };
   const shared = { ...base };
+  const officeLocal = { ...local };
   if (office === 'codex') {
-    // The shipped config contains Claude-specific brain, port, and model defaults.
-    delete shared.brain;
-    delete shared.port;
-    delete shared.model;
+    // Shared app config carries Claude-specific defaults and capabilities.
+    for (const key of ['brain', 'port', 'model', 'mcp', 'tools', 'teams']) delete shared[key];
+    // These capabilities are only valid when the Codex runtime reports them.
+    for (const key of ['mcp', 'tools', 'teams']) delete officeLocal[key];
   }
-  const c = { ...defaults, ...shared, ...local }; // Claude-specific values require explicit Codex config in the Codex office.
-  c.mcp = { allow: [], deny: [], departments: {}, ...(base.mcp || {}), ...(local.mcp || {}) };
-  c.tools = { web: true, browser: true, ...(base.tools || {}), ...(local.tools || {}) }; // V3.2 (16 Sep): browser = Claude in Chrome
-  c.teams = { enabled: true, max: 4, ...(base.teams || {}), ...(local.teams || {}) }; // V3.2 (16 Sep): Agent Teams
+  const c = {
+    ...defaults, ...shared, ...officeLocal,
+    mcp: office === 'codex' ? { allow: [], deny: [], departments: {} } : { allow: [], deny: [], departments: {}, ...(base.mcp || {}), ...(local.mcp || {}) },
+    tools: office === 'codex' ? { web: false, browser: false } : { web: true, browser: true, ...(base.tools || {}), ...(local.tools || {}) },
+    teams: office === 'codex' ? { enabled: false, max: 0 } : { enabled: true, max: 4, ...(base.teams || {}), ...(local.teams || {}) },
+  }; // Claude capabilities are not assumed to be available in the Codex runtime.
   if (env.AO_NAME) c.name = env.AO_NAME;
   const brainOverride = office === 'claude' ? (env.AO_CLAUDE_BRAIN || env.AO_BRAIN) : env.AO_CODEX_BRAIN;
   if (brainOverride) c.brain = brainOverride;
