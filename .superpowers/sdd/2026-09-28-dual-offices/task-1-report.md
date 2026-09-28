@@ -35,7 +35,7 @@ Implementada en `feat/dual-offices` dentro del alcance de la Tarea 1. A las corr
 - Mensaje: `feat: resolve isolated office state paths`
 - Hash de implementación: `03d8098326a33fec089d84644bce55439391d665`.
 - Commit de corrección P1: `dc98d799c4ddfb02654e3c1e3854a2406e6c18ca` (`fix: isolate effective Codex config defaults`).
-- Commit de corrección de capacidades: pendiente de crear.
+- Commit de corrección de capacidades: `16a1181fdf9afa9511489de4f3962398e9f44d1f` (`fix: isolate Codex capabilities from Claude`).
 - Revisión nativa: pendiente del orquestador.
 
 ## Riesgos y seguimiento
