@@ -12,13 +12,21 @@ La Tarea queda **parcial**: el paquete `@openai/codex-sdk@0.157.1` no está inst
 - **RED de política:** la prueba `codexProvider_blocksInvalidConfiguredPolicyWithoutReplacingItWithBroaderDefaults` falló cuando la política inválida terminaba en `failed` tras intentar cargar el SDK, en vez de bloquear antes de iniciar; luego pasó al validar controles antes de crear el cliente.
 - **Pruebas con doble:** herencia de entorno sin opciones/credenciales, workspace/model/sandbox/aprobación, capacidades desconocidas, política incompatible, eventos finales únicamente, errores del proveedor y no-fallback.
 
+## Corrección posterior a revisión independiente
+
+- **RED — cwd con symlink:** una raíz temporal del workspace contenía un symlink a un directorio temporal externo. La llamada llegaba al doble del SDK y terminaba `failed` en vez de `blocked`; la prueba también cuenta las construcciones del SDK y llamadas a `startThread`.
+- **GREEN — cwd canónico:** antes del SDK, `realpathSync` resuelve la raíz y el cwd solicitado, no crea directorios y evalúa contención sobre rutas canónicas. Si cualquiera no existe/no es resoluble, se bloquea sin empezar hilo. El SDK recibe el cwd canónico.
+- **RED — aprobación:** el doble de provider devolvió `blocked` tras `/approve`, y el test observó `approved: true` pese al error.
+- **GREEN — aprobación diferida:** solo un resultado sin error y distinto de `blocked`/`pending` persiste `approved: true`. Error/blocked/pending conserva `approved: false` y elimina `approvedAt`; no cambia política ni busca otro provider.
+- **Commit correctivo:** `27aac42` (`fix: contain Codex cwd and defer approval state`).
+
 ## Verificación observada
 
-- `node --test test/codex-provider.test.mjs test/office-server.test.mjs` — **20/20**.
-- `node --test test/*.test.mjs` — **88/88**.
+- `node --test test/codex-provider.test.mjs test/office-server.test.mjs` — **22/22**, tras la corrección independiente.
+- `node --test test/*.test.mjs` — **90/90**, tras la corrección independiente.
 - Runtime harness `node --test test/codex-provider.test.mjs` — injected SDK double plus local HTTP/ephemeral port and temporary data/brain roots; **9/9** (covered by the observed combined run).
 - `npm install --package-lock-only --offline --ignore-scripts --save-exact @openai/codex-sdk@0.157.1` — **bloqueado por ENOTCACHED**; no instaló ni cambió manifests.
-- `git diff --check` — limpio antes del commit.
+- `git diff --check` — limpio antes del commit correctivo.
 - Build/check no ejecutados: la comprobación de servidor existente puede recorrer lógica de proveedor; build recompone artefactos generados fuera de este alcance. No se ejecutaron auth, `codex login status`, proveedores reales ni red.
 
 ## Alcance y preservación
