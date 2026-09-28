@@ -699,7 +699,7 @@
   .tp-av { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid; flex: none;
     display: inline-grid; place-items: center; font-family: var(--serif); font-size: 11px; color: var(--ink); background: #fff; }
   .tp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-bottom: 1px solid var(--ink); padding: 2px 2px 7px; }
-  .tp-lab { display: flex; align-items: baseline; gap: 4px; min-width: 0; flex: 1 1 auto; font-family: var(--serif); font-size: 19px; letter-spacing: .04em; }
+  .tp-lab { display: flex; align-items: baseline; gap: 4px; min-width: 0; flex: 1 0 auto; font-family: var(--serif); font-size: 19px; letter-spacing: .04em; } /* T8: flex-shrink:0 — the title keeps its full width; .tp-scope gives way instead */
   .tp-labtxt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* T6: a longer ES title (ESTADO DE LA TAREA) clips instead of wrapping the badge onto its own line */
   .tp-mode { flex: none; white-space: nowrap; font-family: var(--ui); font-size: 8.5px; letter-spacing: .16em; font-weight: 700; color: var(--grey);
     border: 1px solid var(--hairline); border-radius: 99px; padding: 2px 7px; vertical-align: 4px; }
@@ -714,7 +714,7 @@
   .tp-row.live.done { cursor: pointer; opacity: .9; }
   .tp-row.live.done:hover { border-color: var(--ink); }
   .tp-res { color: #1E9070; font-weight: 600; }
-  .tp-scope { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; letter-spacing: .16em; color: var(--grey); font-weight: 600; } /* T6: a longer ES scope (TODA LA OFICINA) clips instead of squeezing/wrapping */
+  .tp-scope { flex: 0 1 auto; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; letter-spacing: .16em; color: var(--grey); font-weight: 600; } /* T8: the title (.tp-lab, flex-shrink:0 above) never gives up space; this label absorbs the squeeze and ellipsizes instead, so "ESTADO DE LA TAREA" stays fully readable instead of clipping to "ESTADO D…" */
   .tp-chips { display: flex; gap: 5px; flex-wrap: wrap; }
   .tp-chip {
     display: flex; align-items: baseline; gap: 5px; border: 1px solid var(--hairline); background: none; cursor: pointer;
