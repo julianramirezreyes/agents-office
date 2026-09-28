@@ -31,7 +31,7 @@ Implementada en `feat/dual-offices` dentro del alcance de la Tarea 1. No se inic
 ## Commit
 
 - Mensaje: `feat: resolve isolated office state paths`
-- Hash: pendiente de crear.
+- Hash de implementación: `03d8098326a33fec089d84644bce55439391d665`.
 - Revisión nativa: pendiente del orquestador.
 
 ## Riesgos y seguimiento

@@ -70,7 +70,7 @@ Cada tarea corresponde a la tarea numerada equivalente del plan `docs/superpower
 
 ## Progreso y siguiente paso
 
-- Progreso: documento de recuperación creado antes de la primera edición de código. Baseline reportada: 56 pruebas pasan. `size:exception` aprobada. DO-01 implementada con RED → GREEN; suite actual 64/64. `npm run check` quedó en 19/22 por build sin `esbuild`, smoke sin `playwright-core` y fallo de arranque del servidor; `npm run build` confirma dependencia `esbuild` ausente. No se instalaron dependencias ni se invocaron proveedores. Pendiente registrar el hash del commit de DO-01 y revisión nativa.
+- Progreso: documento de recuperación creado antes de la primera edición de código. Baseline reportada: 56 pruebas pasan. `size:exception` aprobada. DO-01 implementada con RED → GREEN; suite actual 64/64. `npm run check` quedó en 19/22 por build sin `esbuild`, smoke sin `playwright-core` y fallo de arranque del servidor; `npm run build` confirma dependencia `esbuild` ausente. No se instalaron dependencias ni se invocaron proveedores. Commit de implementación DO-01: `03d8098326a33fec089d84644bce55439391d665`; revisión nativa pendiente del orquestador.
 - Pendiente: continuar con DO-02 en el worktree aprobado. Antes de integrar con el checkout fuente, reconciliar sus cambios locales; no sobreescribirlos.
 
 ## Archivos de referencia
@@ -86,5 +86,5 @@ Cada tarea corresponde a la tarea numerada equivalente del plan `docs/superpower
 - **Verificación:** `node --test test/office-paths.test.mjs` — 8/8; `node --test test/*.test.mjs` — 64/64; `git diff --check` — sin errores. `npm run check` — 19/22, bloqueado por `esbuild`, `playwright-core` ausente y servidor que no inicia; `npm run build` — no puede importar `esbuild` (`ERR_MODULE_NOT_FOUND`). No instalar dependencias por alcance explícito.
 - **Rollback:** revertir el commit de DO-01, que contiene solo resolución/configuración de rutas, ignore rules, pruebas y esta evidencia; no requiere revertir trabajo ajeno.
 - **Runtime harness:** N/A — unidad pura de resolución/validación de rutas, sin servidor ni proveedor.
-- **Commit:** pendiente de crear en esta ejecución.
+- **Commit de implementación:** `03d8098326a33fec089d84644bce55439391d665` (`feat: resolve isolated office state paths`).
 - **Revisión nativa:** pendiente del orquestador; no ejecutada por esta unidad.
