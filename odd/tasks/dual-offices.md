@@ -117,5 +117,5 @@ Cada tarea corresponde a la tarea numerada equivalente del plan `docs/superpower
 - **Commit de dependencia/cierre:** `21f2f37` (`feat: add Codex SDK dependency`), incluye manifest/lock y esta actualización de evidencia.
 - **Informe:** `.superpowers/sdd/2026-09-28-dual-offices/task-3-report.md`.
 - **Hallazgos de revisión independiente corregidos:** symlink interno a directorio externo superaba el control léxico, y `/approve` podía persistir `approved: true` y una nota para estados `blocked` y `failed` sin error. Las pruebas usan SDK/provider dobles; no se amplió política ni se añadió fallback.
-- **Cierre:** DO-03 queda completa; dependencia fijada, SDK importable y todas las pruebas locales planificadas observadas en verde. Las limitaciones de ejecución real/auth y de build se mantienen intencionales.
+- **Cierre:** DO-03 queda completa en su alcance local: dependencia fijada, SDK importable y pruebas Node enfocadas/completas en verde. La revisión independiente confirmó manifest, lock, API y pruebas. No se probó la ejecución real del CLI, proveedor ni autenticación; build/check siguen pendientes por sus efectos y límites descritos.
 - **skill_resolution:** `paths-injected` — cuatro rutas exactas de TDD, verificación, work-unit-commits y OpenAI Docs.
