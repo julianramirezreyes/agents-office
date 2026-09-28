@@ -100,5 +100,6 @@ Cada tarea corresponde a la tarea numerada equivalente del plan `docs/superpower
 - **Runtime harness:** `node --test test/office-server.test.mjs` — HTTP local de dos runtimes, puertos efímeros y raíces temporales; sin servidor/proveedor externo. Build/smoke no ejecutados por las razones anteriores.
 - **Rollback:** revertir los commits DO-02 en orden inverso; no se requieren cambios en launcher/UI/Codex SDK.
 - **Commits:** `58c6a976990118a4c70954db81a79d1bab33aa94` (`refactor: isolate office server runtime state`), `52e8b9a26a55a2e217874dc5d8a4b223fffb2419` (`fix: isolate Codex roster customizations`).
+- **Seguimiento commits:** `c8667aa` (`fix: isolate provider endpoints and drain shutdown work`), `2ff77b7` (`test: assert clean Claude shutdown result`), `c8ff4dd` (`docs: record DO-02 review corrections`).
 - **Skill resolution:** `paths-injected` — se cargaron los tres SKILL.md exigidos (TDD, work-unit-commits, verification-before-completion).
-- **Hash seguimiento:** `serve.mjs` `7a2593a3963ce5a713029137f1d5b598f3f42ab443bbf9e87b9284a015b14485`; `test/office-server.test.mjs` `4b30729769797f961ef8051a6639238f3b60e1b929034fa483e6ca78afe2f181`.
+- **Hash seguimiento:** `serve.mjs` `7a2593a3963ce5a713029137f1d5b598f3f42ab443bbf9e87b9284a015b14485`; `test/office-server.test.mjs` `45ba78b1bc0829f8c24c02c81c3a5d7f1e487f781d94355fe0a7b35d2d8b6300`.
