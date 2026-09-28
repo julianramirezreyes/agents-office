@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { MCP_LOGOS, MCP_BY_DEPT } from './mcplogos.js';
 import { applyAgentTools, profileShared } from './profile.js';
+import { splitConnectors } from './connectors-split.js';
 
 // agent → tools they'd plausibly be driving (falls back to any connector in the dept's dock)
 export const AGENT_MCP = {
@@ -161,16 +162,24 @@ export function initMcp({ scene, hud, LAYOUT, DEPTS, FR, R, connectors = null })
   for (const k of Object.keys(SHARED)) uniqKeys.push(k);
   const topconn = document.getElementById('topconn');
   const topImgs = {};
+  let moreEl = null; // the collapsed "+N" chip, if any — startReveal() re-pops it alongside the tiles
+  // V3.7: 37 real servers (11 connected, 26 needs-auth/failed) overflowed the bar and pushed
+  // the brand + right-hand controls off-screen. splitConnectors() (src/connectors-split.js,
+  // pure, unit-tested) keeps every connected tile (+ Chrome, always) as before and folds the
+  // rest into one grey "+N" chip so the strip stays a fixed handful of tiles.
+  const reasonFor = k => k === 'chrome' && STATUS[k] === 'pending' ? 'Claude in Chrome extension not paired on this machine — run `claude --chrome` once, then restart the office' // V3.2 (16 Sep)
+    : ({ 'needs-auth': 'needs authentication (run claude, then /mcp)', failed: 'failed to connect', pending: 'connecting…', denied: 'connected · blocked for agents in office.config.json' }[STATUS[k]] || STATUS[k]);
+  const { shown, collapsed } = splitConnectors(uniqKeys.map(k => ({ key: k, name: NAMES[k] || LOGOS[k].name, status: STATUS[k] })));
+  const tileCount = shown.length + (collapsed.length ? 1 : 0); // actual DOM tiles rendered — drives the pop-in stagger below
   if (topconn) {
     topconn.innerHTML = `<span class="tc-lab"><span class="dot"></span>CONNECTED TO</span>`;
-    uniqKeys.forEach((k, i) => {
+    shown.forEach(({ key: k }, i) => {
       const img = document.createElement('img');
       img.src = LOGOS[k].img;
       img.alt = img.title = LOGOS[k].name;
-      if (STATUS[k] && STATUS[k] !== 'connected') { // real list: a server that is there but not usable
+      if (STATUS[k] && STATUS[k] !== 'connected') { // real list: a server that is there but not usable (Chrome, still pairing)
         img.classList.add('off', 'st-' + STATUS[k]);
-        img.title = LOGOS[k].name + ' — ' + (k === 'chrome' && STATUS[k] === 'pending' ? 'Claude in Chrome extension not paired on this machine — run `claude --chrome` once, then restart the office' // V3.2 (16 Sep)
-          : ({ 'needs-auth': 'needs authentication (run claude, then /mcp)', failed: 'failed to connect', pending: 'connecting…', denied: 'connected · blocked for agents in office.config.json' }[STATUS[k]] || STATUS[k]));
+        img.title = LOGOS[k].name + ' — ' + reasonFor(k);
       }
       img.style.setProperty('--d', (0.15 + i * 0.09) + 's'); // staggered pop-in on load
       img.addEventListener('animationend', (e) => { if (e.animationName === 'tcin') img.classList.add('in'); });
@@ -178,6 +187,16 @@ export function initMcp({ scene, hud, LAYOUT, DEPTS, FR, R, connectors = null })
       topconn.appendChild(img);
       topImgs[k] = img;
     });
+    if (collapsed.length) { // one grey "+N" chip for every needs-auth/failed server, never wired to a pod
+      const more = document.createElement('span');
+      more.className = 'tc-more';
+      more.textContent = '+' + collapsed.length;
+      more.title = collapsed.map(({ key: k, name }) => (name || k) + ' — ' + reasonFor(k)).join('\n');
+      more.style.setProperty('--d', (0.15 + shown.length * 0.09) + 's');
+      more.addEventListener('animationend', (e) => { if (e.animationName === 'tcin') more.classList.add('in'); });
+      topconn.appendChild(more);
+      moreEl = more;
+    }
     if (LIVE && !uniqKeys.length) { // honest empty state — nothing is wired until the user connects something
       const none = document.createElement('span');
       none.className = 'tc-none';
@@ -191,7 +210,7 @@ export function initMcp({ scene, hud, LAYOUT, DEPTS, FR, R, connectors = null })
   // read as "drones attacking the pods", AJ). Zoomed in, tile→desk beams as before.
   // volleyAt schedules the boot/replay flourish: a pulse from every connector into its dept(s).
   let cam = null, dockAcur = 0;
-  let volleyAt = performance.now() + uniqKeys.length * 90 + 900;
+  let volleyAt = performance.now() + tileCount * 90 + 900;
 
   // ── permanent wiring loom (overview mode) ──
   // One fixed conduit per dept: leaves the top bar under that dept's logo cluster, bows out
@@ -494,11 +513,11 @@ export function initMcp({ scene, hud, LAYOUT, DEPTS, FR, R, connectors = null })
 
   // C hotkey / CC.connectorReveal(): re-pop the top-bar logos, then the beam volley
   function startReveal(now) {
-    for (const img of Object.values(topImgs)) {
+    for (const img of [...Object.values(topImgs), ...(moreEl ? [moreEl] : [])]) {
       img.classList.remove('in', 'tpulse');
       img.style.animation = 'none'; void img.offsetWidth; img.style.animation = '';
     }
-    volleyAt = now + uniqKeys.length * 90 + 600;
+    volleyAt = now + tileCount * 90 + 600;
   }
 
   function pulse(item, now, amp = 0.3) {
