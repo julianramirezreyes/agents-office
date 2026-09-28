@@ -315,6 +315,25 @@ documented one; when it does not answer, the gauge shows the office's own count 
 five-hour window instead, and says so on hover. No dollars anywhere: the office runs on the plan
 you already pay for, and the gauge is there to show it.
 
+## Language (EN/ES)
+
+The **ES** button beside CALENDAR switches the whole office — labels, buttons, hints, the task
+feed, server messages — into Spanish; press it again (now **EN**) to switch back. The first time
+you switch, each string on screen is asked of Claude once and the answer is cached to
+`data/i18n/es.json`; every switch after that is instant, cache hits. New text the app renders
+later (a fresh task row, a routine's countdown) is picked up and translated the same way, with no
+extra step. `<html lang>` follows the toggle.
+
+Never translated: anything you or an agent wrote — chat messages, agent deliverables, brain note
+titles and content — plus form values, numbers, times, dates, money and percentages, and a task
+title you typed live yourself. Agent output stays in whatever language you write to it; that is a
+separate, per-agent house-style choice, not this toggle. The toggle only exists with the server
+running (`npm start`); the demo (double-clicking `dist/command-centre-v2.html`) has nowhere to ask
+for a translation, so the button stays hidden there.
+
+Delete `data/i18n/es.json` to reset every cached translation — the next switch to Spanish asks
+Claude again from scratch.
+
 ## Make it yours
 
 `office.config.json`:
