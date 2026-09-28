@@ -19,11 +19,14 @@ La Tarea queda **parcial**: el paquete `@openai/codex-sdk@0.157.1` no está inst
 - **RED — aprobación:** el doble de provider devolvió `blocked` tras `/approve`, y el test observó `approved: true` pese al error.
 - **GREEN — aprobación diferida:** solo un resultado sin error y distinto de `blocked`/`pending` persiste `approved: true`. Error/blocked/pending conserva `approved: false` y elimina `approvedAt`; no cambia política ni busca otro provider.
 - **Commit correctivo:** `27aac42` (`fix: contain Codex cwd and defer approval state`).
+- **RED — estado failed sin error:** un provider doble devolvió `{ status: 'failed', text: 'provider output', error: null }`; antes del arreglo la tarea persistía `approved: true` y escribía una nota.
+- **GREEN — éxito explícito:** para resultados que reportan estado de provider, el runtime solo ejecuta efectos de aprobación/notas con `providerStatus: 'completed'`; otros estados dejan `approved: false`, limpian `approvedAt` y no generan nota. Proveedores legacy sin estado reportado mantienen el flujo existente.
+- **Commit correctivo:** `2300a02` (`fix: require completed Codex approval result`).
 
 ## Verificación observada
 
-- `node --test test/codex-provider.test.mjs test/office-server.test.mjs` — **22/22**, tras la corrección independiente.
-- `node --test test/*.test.mjs` — **90/90**, tras la corrección independiente.
+- `node --test test/codex-provider.test.mjs test/office-server.test.mjs` — **23/23**, tras las correcciones independientes.
+- `node --test test/*.test.mjs` — **91/91**, tras las correcciones independientes.
 - Runtime harness `node --test test/codex-provider.test.mjs` — injected SDK double plus local HTTP/ephemeral port and temporary data/brain roots; **9/9** (covered by the observed combined run).
 - `npm install --package-lock-only --offline --ignore-scripts --save-exact @openai/codex-sdk@0.157.1` — **bloqueado por ENOTCACHED**; no instaló ni cambió manifests.
 - `git diff --check` — limpio antes del commit correctivo.
