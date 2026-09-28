@@ -719,7 +719,11 @@ export function attachShutdownHandlers(runtime, { processRef = process, warn = c
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  const runtime = await createOfficeRuntime({ officeConfig: loadConfig() });
+  const managedOffice = process.env.AO_OFFICE;
+  const officeConfig = managedOffice
+    ? { ...loadConfig({ office: managedOffice, env: process.env }), office: managedOffice, provider: process.env.AO_PROVIDER || managedOffice }
+    : loadConfig();
+  const runtime = await createOfficeRuntime({ officeConfig });
   await runtime.start();
   attachShutdownHandlers(runtime);
 }

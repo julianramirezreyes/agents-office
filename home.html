@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <title>Agents Office</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f3f4f6; color: #111827; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 2rem; }
+    main { width: min(100%, 760px); }
+    h1 { margin: 0 0 .4rem; font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -.04em; }
+    .intro { color: #4b5563; margin: 0 0 1.8rem; }
+    .offices { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
+    article { background: white; border: 1px solid #d1d5db; border-radius: 1rem; padding: 1.4rem; box-shadow: 0 8px 24px #1118270b; }
+    h2 { margin: 0; font-size: 1.25rem; }
+    .status { display: flex; align-items: center; gap: .5rem; color: #4b5563; margin: 1rem 0; min-height: 1.5rem; }
+    .dot { width: .65rem; height: .65rem; border-radius: 50%; background: #9ca3af; }
+    .ready .dot { background: #16a34a; }
+    .failed .dot { background: #dc2626; }
+    .error { color: #b91c1c; min-height: 1.25rem; overflow-wrap: anywhere; }
+    a { display: inline-block; border-radius: .6rem; padding: .7rem 1rem; color: white; background: #1f2937; text-decoration: none; font-weight: 650; }
+    a[aria-disabled="true"] { opacity: .5; pointer-events: none; }
+    footer { color: #6b7280; font-size: .85rem; margin-top: 1.2rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Agents Office</h1>
+    <p class="intro">Choose an independent office. / Elige una oficina independiente.</p>
+    <section class="offices" aria-label="Offices / Oficinas">
+      <article data-office="claude" aria-labelledby="claude-title">
+        <h2 id="claude-title">Claude Office</h2>
+        <p class="status" role="status"><span class="dot" aria-hidden="true"></span><span data-status>Checking readiness… / Comprobando disponibilidad…</span></p>
+        <p class="error" data-error aria-live="polite"></p>
+        <a data-enter href="#" aria-disabled="true">Open Claude / Abrir Claude</a>
+      </article>
+      <article data-office="codex" aria-labelledby="codex-title">
+        <h2 id="codex-title">Codex Office</h2>
+        <p class="status" role="status"><span class="dot" aria-hidden="true"></span><span data-status>Checking readiness… / Comprobando disponibilidad…</span></p>
+        <p class="error" data-error aria-live="polite"></p>
+        <a data-enter href="#" aria-disabled="true">Open Codex / Abrir Codex</a>
+      </article>
+    </section>
+    <footer>Local launcher · Lanzador local</footer>
+  </main>
+  <script>
+    const labels = { ready: 'Ready / Disponible', failed: 'Unavailable / No disponible', starting: 'Starting… / Iniciando…', stopped: 'Stopped / Detenida', 'pending-shutdown': 'Stopping; work pending / Cerrando; hay trabajo pendiente' };
+    async function refresh() {
+      try {
+        const response = await fetch('/api/health', { cache: 'no-store' });
+        const data = await response.json();
+        for (const name of ['claude', 'codex']) {
+          const office = data.offices?.[name];
+          const card = document.querySelector(`[data-office="${name}"]`);
+          if (!office || !card) continue;
+          card.classList.toggle('ready', office.status === 'ready');
+          card.classList.toggle('failed', office.status === 'failed');
+          card.querySelector('[data-status]').textContent = labels[office.status] || office.status;
+          card.querySelector('[data-error]').textContent = office.error || '';
+          const link = card.querySelector('[data-enter]');
+          link.href = office.url || '#';
+          link.setAttribute('aria-disabled', office.status === 'ready' ? 'false' : 'true');
+        }
+      } catch {
+        for (const status of document.querySelectorAll('[data-status]')) status.textContent = 'Launcher unavailable / Lanzador no disponible';
+      }
+    }
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>
