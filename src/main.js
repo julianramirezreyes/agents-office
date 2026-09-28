@@ -14,6 +14,7 @@ import { loadConnectors } from './connectors.js';
 import { initTasks } from './tasks.js';
 import { initBrain } from './brain.js';
 import { initHero, HERO } from './hero.js';
+import { initI18n } from './i18n.js'; // V3.7: the EN/ES toggle in the top bar (inert in demo mode)
 if (HERO) document.body.classList.add('hero'); // the website hero: no Sahni.ai mark or licence line on top of the page that already carries them // sahni.ai/custom hero mode (16 Sep 2026): opt-in via window.HERO, no-op otherwise
 let tasks = null; // V3 task boards — initialised after the rail constants exist
 
@@ -1389,6 +1390,7 @@ function resize() {
 }
 addEventListener('resize', resize);
 resize();
+initI18n(); // V3.7: after the shell and boards exist, so the toggle button and the walk have something to work on
 
 // deterministic view hooks for headless screenshots: #view=sales | #zoom=2.2
 {
