@@ -70,7 +70,7 @@ Cada tarea corresponde a la tarea numerada equivalente del plan `docs/superpower
 
 ## Progreso y siguiente paso
 
-- Progreso: documento de recuperación creado antes de la primera edición de código. Baseline reportada: 56 pruebas pasan. `size:exception` aprobada. DO-01 implementada con RED → GREEN; una revisión independiente encontró que la configuración efectiva Codex todavía heredaba `port`, `brain` y `model` de Claude; la corrección está cubierta con pruebas. Suite actual 66/66. `npm run check` quedó en 19/22 en la verificación anterior, por dependencias ambientales y fallo de arranque; `npm run build` vuelve a confirmar `esbuild` ausente. No se instalaron dependencias ni se invocaron proveedores/auth. Commit original DO-01: `03d8098326a33fec089d84644bce55439391d665`; commit de corrección pendiente de registrar tras crear; revisión nativa pendiente del orquestador.
+- Progreso: documento de recuperación creado antes de la primera edición de código. Baseline reportada: 56 pruebas pasan. `size:exception` aprobada. DO-01 implementada con RED → GREEN; una revisión independiente encontró que la configuración efectiva Codex todavía heredaba `port`, `brain` y `model` de Claude; la corrección está cubierta con pruebas. Suite actual 66/66. `npm run check` quedó en 19/22 en la verificación anterior, por dependencias ambientales y fallo de arranque; `npm run build` vuelve a confirmar `esbuild` ausente. No se instalaron dependencias ni se invocaron proveedores/auth. Commit original DO-01: `03d8098326a33fec089d84644bce55439391d665`; corrección: `dc98d799c4ddfb02654e3c1e3854a2406e6c18ca`; revisión nativa pendiente del orquestador.
 - Pendiente: continuar con DO-02 en el worktree aprobado. Antes de integrar con el checkout fuente, reconciliar sus cambios locales; no sobreescribirlos.
 
 ## Archivos de referencia
@@ -86,5 +86,5 @@ Cada tarea corresponde a la tarea numerada equivalente del plan `docs/superpower
 - **Verificación:** `node --test test/office-paths.test.mjs` — 10/10; `node --test test/*.test.mjs` — 66/66; `git diff --check` — sin errores. `npm run check` — 19/22 en la verificación anterior, bloqueado por `esbuild`, `playwright-core` ausente y servidor que no inicia; no se repitió para evitar cualquier ruta de auth/provider prohibida. `npm run build` (ejecución actual) — no puede importar `esbuild` (`ERR_MODULE_NOT_FOUND`). No instalar dependencias.
 - **Rollback:** revertir el commit de DO-01, que contiene solo resolución/configuración de rutas, ignore rules, pruebas y esta evidencia; no requiere revertir trabajo ajeno.
 - **Runtime harness:** N/A — unidad pura de resolución/validación de rutas, sin servidor ni proveedor.
-- **Commits:** `03d8098326a33fec089d84644bce55439391d665` (`feat: resolve isolated office state paths`) más commit de corrección P1 pendiente de crear.
+- **Commits:** `03d8098326a33fec089d84644bce55439391d665` (`feat: resolve isolated office state paths`) y `dc98d799c4ddfb02654e3c1e3854a2406e6c18ca` (`fix: isolate effective Codex config defaults`).
 - **Revisión nativa:** pendiente del orquestador; no ejecutada por esta unidad.
