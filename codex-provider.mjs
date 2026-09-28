@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 
 const VALID_SANDBOX = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 const VALID_APPROVAL = new Set(['untrusted', 'on-request', 'on-failure', 'never']);
@@ -35,8 +36,15 @@ export function createCodexProvider({ sdk, codexHome, workspaceRoot = process.cw
     },
 
     async runTask({ taskId, prompt, cwd = root, model, approvalPolicy: requestedApproval = approvalPolicy, onEvent } = {}) {
-      const workingDirectory = path.resolve(cwd);
-      if (!inside(root, workingDirectory)) {
+      let canonicalRoot;
+      let workingDirectory;
+      try {
+        canonicalRoot = fs.realpathSync(root);
+        workingDirectory = fs.realpathSync(path.resolve(cwd));
+      } catch {
+        return { status: 'blocked', error: 'Requested working directory is unavailable under the Codex workspace policy', taskId, provider: 'codex' };
+      }
+      if (!inside(canonicalRoot, workingDirectory)) {
         return { status: 'blocked', error: 'Requested working directory is outside the Codex workspace policy', taskId, provider: 'codex' };
       }
       if (!VALID_SANDBOX.has(sandboxMode) || !VALID_APPROVAL.has(approvalPolicy)) {
