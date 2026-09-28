@@ -15,6 +15,7 @@ import { initTasks } from './tasks.js';
 import { initBrain } from './brain.js';
 import { initHero, HERO } from './hero.js';
 import { initI18n } from './i18n.js'; // V3.7: the EN/ES toggle in the top bar (inert in demo mode)
+import { readRealOnly, writeRealOnly, shouldSeedDemo, shouldShowRealToggle, realOnly } from './real-only.js'; // V3.7: real-only
 if (HERO) document.body.classList.add('hero'); // the website hero: no Sahni.ai mark or licence line on top of the page that already carries them // sahni.ai/custom hero mode (16 Sep 2026): opt-in via window.HERO, no-op otherwise
 let tasks = null; // V3 task boards — initialised after the rail constants exist
 
@@ -343,9 +344,21 @@ const BB_ROWS = profileRows() || {
     ['INVOICES ISSUED', () => Math.round(kv('invoices'))],
     ['BILLS PAID', () => STATS.billsPaid]],
   brain: [
-    ['NOTES INDEXED', () => brainNotes.toLocaleString('en-NZ')]],
+    // V3.7: real-only — the Brain's own note count is real (brain.state.notes), never invented; the
+    // ambient `brainNotes` counter (ticked up by demo events) is used only outside REAL ONLY.
+    ['NOTES INDEXED', () => (realOnly() ? brain.state.notes : brainNotes).toLocaleString('en-NZ')]],
 };
-if (PROFILE && !BB_ROWS.brain) BB_ROWS.brain = [['NOTES INDEXED', () => brainNotes.toLocaleString('en-NZ')]];
+if (PROFILE && !BB_ROWS.brain) BB_ROWS.brain = [['NOTES INDEXED', () => (realOnly() ? brain.state.notes : brainNotes).toLocaleString('en-NZ')]];
+// V3.7: real-only — every other pod-card metric row above is demo theatre (STATS/KPIS mocks);
+// show "—" for it instead of inventing a real number.
+function bbVal(k, row) { return k !== 'brain' && realOnly() ? '—' : String(row[1]()); }
+// V3.7: real-only — the "THE BRAIN · N NOTES" pill (below) is built once from brain.state.notes
+// before the real graph has loaded, and nothing else repaints it. Once REAL ONLY confirms the
+// real graph is in (brain.setGraph already resolved by the time onLive fires), fix its count.
+function refreshBrainTag() {
+  const b = deptRT.brain && deptRT.brain.badge, num = b && b.querySelector('b');
+  if (num) num.textContent = brain.state.notes.toLocaleString('en-NZ');
+}
 for (const k of [...DEPT_KEYS, 'brain']) {
   const dept = DEPTS[k];
   const n = AGENTS.filter(a => a.dept === k).length;
@@ -355,7 +368,7 @@ for (const k of [...DEPT_KEYS, 'brain']) {
     <div class="b-name"><span class="dot" style="background:${dept.chip}"></span>${dept.short}<span class="live"></span></div>
     <div class="b-count">${k === 'brain' ? '<span class="b-num">∞</span><span class="b-lab">KNOWLEDGE</span>' : `<span class="b-num">${n}</span><span class="b-lab">AGENTS</span>`}</div>
     <div class="b-metrics">${BB_ROWS[k].map((row, i) => `
-      <div class="m-row"><span class="m-lab">${row[0]}</span><span class="m-val" data-m="${k}-${i}">${row[1]()}</span></div>`).join('')}
+      <div class="m-row"><span class="m-lab">${row[0]}</span><span class="m-val" data-m="${k}-${i}">${bbVal(k, row)}</span></div>`).join('')}
     </div>
     <div class="b-appr" style="display:none">⚠ <span class="ap-n">1</span> WAITING APPROVAL</div>`;
   b.addEventListener('click', (e) => {
@@ -371,7 +384,7 @@ for (const k of [...DEPT_KEYS, 'brain']) {
   }
   hud.appendChild(b);
   deptRT[k].badge = b;
-  deptRT[k].vals = BB_ROWS[k].map(row => String(row[1]()));
+  deptRT[k].vals = BB_ROWS[k].map(row => bbVal(k, row));
   deptRT[k].apprRow = b.querySelector('.b-appr');
   deptRT[k].apprN = b.querySelector('.ap-n');
   // anchor just above the FIRST DESK ROW (z-9.6), not the pod edge — keeps the card-to-agents
@@ -397,7 +410,7 @@ for (const k of [...DEPT_KEYS, 'brain']) {
 function updateBillboards() {
   for (const k of Object.keys(BB_ROWS)) {
     BB_ROWS[k].forEach((row, i) => {
-      const nv = String(row[1]());
+      const nv = bbVal(k, row);
       if (nv !== deptRT[k].vals[i]) {
         deptRT[k].vals[i] = nv;
         const el = deptRT[k].badge.querySelector(`[data-m="${k}-${i}"]`);
@@ -732,7 +745,7 @@ function buildDeptRail(k) {
     <div class="b-name"><span class="dot" style="background:${dept.chip}"></span>${dept.name}<span class="live"></span></div>
     <div class="b-count"><span class="b-num">${n}</span><span class="b-lab">AGENTS</span></div>
     <div class="b-metrics">${BB_ROWS[k].map((row, i) => `
-      <div class="m-row"><span class="m-lab">${row[0]}</span><span class="m-val" data-rm="${k}-${i}">${row[1]()}</span></div>`).join('')}</div>
+      <div class="m-row"><span class="m-lab">${row[0]}</span><span class="m-val" data-rm="${k}-${i}">${bbVal(k, row)}</span></div>`).join('')}</div>
     ${tasks ? tasks.rowHTML(k) : ''}
     <div class="b-appr" style="display:${stuckIn(k).length ? 'flex' : 'none'}">⚠ <span class="ap-n">${stuckIn(k).length}</span> WAITING APPROVAL</div>`;
   const trow = rh.querySelector('.b-tasks');
@@ -1058,8 +1071,18 @@ function fireAgentEvent(seedTs) {
   }
 }
 // seed a believable history so Activity isn't empty at boot
-for (let i = 0; i < 170; i++) fireAgentEvent(Date.now() - ri(2, 200) * 60000);
-for (const r of Object.values(R)) r.feed.sort((a, b) => b.ts - a.ts);
+// V3.7: real-only — a served office in REAL ONLY skips this fake history; boot-time guess (see
+// real-only.js), corrected by maybeSeedHistory(false) if /api/health later says we're not live.
+const realOnlyServedM = location.protocol.startsWith('http');
+const realOnlyFlagM = readRealOnly(typeof localStorage !== 'undefined' ? localStorage : null);
+let seededHistoryM = false;
+function maybeSeedHistory(liveKnown) {
+  if (seededHistoryM || !shouldSeedDemo({ realOnly: realOnlyFlagM, served: realOnlyServedM, live: liveKnown })) return;
+  seededHistoryM = true;
+  for (let i = 0; i < 170; i++) fireAgentEvent(Date.now() - ri(2, 200) * 60000);
+  for (const r of Object.values(R)) r.feed.sort((a, b) => b.ts - a.ts);
+}
+maybeSeedHistory(undefined);
 
 /* ---------- minimal sim: work bobs, screen updates, brain meetings ---------- */
 let meeting = null; // Brain meetings fire ONLY on the X hotkey (AJ's call — demo cue, not ambient)
@@ -1239,9 +1262,11 @@ function tickSim(now, dt) {
   }
   // ambient emoji work-bubbles pop over random desks every beat or two
   if (now > nextEmoteAt) {
-    const ids = Object.keys(R).filter(id => R[id].state === 'working');
-    if (ids.length) spawnEmote(R[ids[Math.floor(Math.random() * ids.length)]],
-      rnd(['💬', '✉️', '📈', '💡', '✓', '📞', '🔍', '📎']));
+    if (!realOnly()) { // V3.7: real-only — no ambient work bubbles when only real work should show
+      const ids = Object.keys(R).filter(id => R[id].state === 'working');
+      if (ids.length) spawnEmote(R[ids[Math.floor(Math.random() * ids.length)]],
+        rnd(['💬', '✉️', '📈', '💡', '✓', '📞', '🔍', '📎']));
+    }
     nextEmoteAt = now + 1200 + Math.random() * 1800;
   }
   tickEmotes(now, dt);
@@ -1259,7 +1284,7 @@ function tickSim(now, dt) {
   }
   // agent events drive everything — feed, chat streams, billboard metrics (nothing is static)
   if (now > nextMetricAt) {
-    fireAgentEvent();
+    if (!realOnly()) fireAgentEvent(); // V3.7: real-only — no fake feed/activity lines
     nextMetricAt = now + 2600 + Math.random() * 3800;
   }
   // live screens: every monitor plays its own session; slower cadence when the camera is far away
@@ -1368,10 +1393,24 @@ function applyRoster(agents) {
   }
   if (tasks && tasks.syncPills) tasks.syncPills(); // the pills were rebuilt — put the clock chips back
 }
+// V3.7: real-only — the top-bar "REAL ONLY" toggle: same shape as #topLang, shown only once
+// /api/health confirms this office is actually live (see real-only.js for why not sooner).
+const topReal = document.getElementById('topReal');
+if (topReal) {
+  topReal.classList.toggle('on', readRealOnly(localStorage));
+  topReal.addEventListener('click', () => {
+    writeRealOnly(localStorage, !readRealOnly(localStorage));
+    location.reload(); // simplest correct way: seeding happens at boot
+  });
+}
+function revealRealToggle(live) {
+  if (topReal) topReal.hidden = !shouldShowRealToggle({ served: location.protocol.startsWith('http'), live });
+}
 tasks = initTasks({
   hud, R, deptRT, RAIL_SIDE, spawnEmote, chatPush, chatHist, feedPush, zoomToApproval, enterFocus, openAgent, esc,
   brainWrite: (id, title) => brain.write(id, title), brain,
-  onLive: (h) => { document.querySelector('#topbar .brand .ver').textContent = 'BETA'; document.title = `${h.name} — Agents Office`; brain.setOwner(h.name); brain.setQuiet(true); applyRoster(h.agents); },
+  onLive: (h) => { document.querySelector('#topbar .brand .ver').textContent = 'BETA'; document.title = `${h.name} — Agents Office`; brain.setOwner(h.name); brain.setQuiet(true); applyRoster(h.agents); revealRealToggle(true); updateBillboards(); if (realOnly()) refreshBrainTag(); }, // V3.7: real-only — repaint the pod-card KPIs and the Brain pill now that realOnly() is settled and the real graph (if any) is in
+  onDemoFallback: () => { revealRealToggle(false); maybeSeedHistory(false); }, // V3.7: real-only — /api/health said not-live; fall back to demo
   onTools: (agentId, keys) => mcp.onToolsUsed(agentId, keys),
   requestApproval, setStuck: setStuckLive,
   onUsage: (u) => { if (mcp && mcp.setUsage) mcp.setUsage(u); }, // V3.6: the plan's gauge in the top bar

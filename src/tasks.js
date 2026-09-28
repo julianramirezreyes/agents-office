@@ -26,6 +26,7 @@ import { applyTasks, PROFILE, titleCase } from './profile.js';
 import { parseWhen, describe, nextRun, fromPicker, untilText } from './when.js';
 import { initCalendar } from './calendar.js'; // V3.2.1 (16 Sep 2026): the calendar on P
 import { MODEL_KEYS, MODELS, DEFAULT_MODEL, modelName, normModel, FROM_TEXT , EFFORT_KEYS, EFFORT_NAME, normEffort, effortName, effortFor } from './models.js';
+import { readRealOnly, shouldSeedDemo, realOnly, setRealOnlyActive } from './real-only.js'; // V3.7: real-only
 
 const SEGMENTS = ['roofing', 'HVAC', 'dental', 'logistics', 'fitness', 'property', 'landscaping', 'legal'];
 
@@ -129,11 +130,21 @@ const STATE_LABEL = { next: 'Backlog', doing: 'In progress', waiting: 'Waiting',
 
 export function initTasks(ctx) {
   const { R, deptRT, spawnEmote, chatPush, chatHist, feedPush, zoomToApproval, enterFocus, openAgent,
-          getFocused, esc, brainWrite, brain, onLive, onTools, requestApproval, setStuck, onUsage } = ctx;
+          getFocused, esc, brainWrite, brain, onLive, onDemoFallback, onTools, requestApproval, setStuck, onUsage } = ctx;
   // LIVE mode (served by serve.mjs): the bar routes through Claude, agents produce real
   // deliverables saved as notes in the brain, and tasks persist. Opened as a file it stays demo.
   let live = false;
   const API = '/api';
+  // V3.7: real-only — the boot-time guess (see real-only.js for why it has to be a guess: seeding
+  // happens synchronously, before the async /api/health round trip that confirms we're live).
+  const served = location.protocol.startsWith('http');
+  const realOnlyFlag = readRealOnly(typeof localStorage !== 'undefined' ? localStorage : null);
+  let seededMorning = false;
+  function maybeSeedMorning(liveKnown) {
+    if (seededMorning || !shouldSeedDemo({ realOnly: realOnlyFlag, served, live: liveKnown })) return;
+    seededMorning = true;
+    seedMorning();
+  }
   const slug = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
 
   const tasks = [];
@@ -233,7 +244,8 @@ export function initTasks(ctx) {
   }
 
   /* ---------- seed a believable morning ---------- */
-  {
+  // V3.7: real-only — wrapped in a function so REAL ONLY can skip it (see maybeSeedMorning above).
+  function seedMorning() {
     const now = performance.now(), wall = Date.now();
     for (const a of AGENTS) {
       const r = R[a.id];
@@ -261,6 +273,7 @@ export function initTasks(ctx) {
       doneCount[k] = n;
     }
   }
+  maybeSeedMorning(undefined); // boot-time guess — see real-only.js
 
   /* ---------- badge rows (far-zoom layer): DOING · NEXT · DONE per pod ---------- */
   function rowHTML(k) {
@@ -669,8 +682,9 @@ export function initTasks(ctx) {
     if (!location.protocol.startsWith('http')) return;
     try {
       const h = await (await fetch(API + '/health')).json();
-      if (!h.ok) return;
+      if (!h.ok) { setRealOnlyActive(false); maybeSeedMorning(false); if (onDemoFallback) onDemoFallback(); return; } // V3.7: real-only — not actually live, fall back to demo
       live = true; setOfficeModel(h.model); setOfficeEffort(h.effort);
+      setRealOnlyActive(realOnlyFlag); maybeSeedMorning(true); // V3.7: real-only — confirmed live, lock in the boot-time guess
       if (h.teams) { teamsCfg = { enabled: h.teams.enabled !== false, max: h.teams.max || 4 }; P_.team.hidden = !teamsCfg.enabled; }
       const mode = panel.querySelector('.tp-mode');
       if (mode) { mode.hidden = false; mode.textContent = 'LIVE · ' + (h.backend === 'anthropic-sdk' ? 'CLAUDE API' : 'CLAUDE'); mode.classList.add('live'); mode.title = `${h.name} · ${h.backend} · ${modelName(h.model)} by default · brain: ${h.brain}`; }
@@ -688,7 +702,7 @@ export function initTasks(ctx) {
       dirty = true;
       if (onLive) onLive(h);
       await poll(); setInterval(poll, 6000); // V3.5: routines fire on the server's clock — the page keeps up
-    } catch (e) { console.warn('office server not reachable — running offline:', e.message); }
+    } catch (e) { setRealOnlyActive(false); maybeSeedMorning(false); if (onDemoFallback) onDemoFallback(); console.warn('office server not reachable — running offline:', e.message); } // V3.7: real-only — offline, fall back to demo
   }
   connect();
   function addTask(agentId, title, by = 'you') {
@@ -969,7 +983,7 @@ export function initTasks(ctx) {
         const nx = agentTasks(id, 'next').sort((a, b) => a.addedAt - b.addedAt)[0];
         if (nx) { start(nx, now); r.nextBrainAt = null; }
         else if (!r.nextBrainAt) r.nextBrainAt = now + 6000 + Math.random() * 16000;
-        else if (now > r.nextBrainAt) { r.nextBrainAt = null; brainSend(id); }
+        else if (now > r.nextBrainAt) { r.nextBrainAt = null; if (!realOnly()) brainSend(id); } // V3.7: real-only — no theatre "Brain sends fresh work" beat; the agent may sit idle
       }
     }
     if (now - lastBadge > 400) { syncBadges(); lastBadge = now; }

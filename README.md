@@ -334,6 +334,18 @@ for a translation, so the button stays hidden there.
 Delete `data/i18n/es.json` to reset every cached translation — the next switch to Spanish asks
 Claude again from scratch.
 
+## Real work only
+
+Once the office is running live (`npm start`), a **REAL ONLY** button appears beside the language
+toggle. Off (the default) is today's office: a believable morning of demo tasks, pod-card numbers
+and feed lines animate the office alongside whatever real work you give it. Click it on and the
+page reloads without any of that — no demo tasks, no invented pod-card numbers (shown as **—**
+instead), no fake feed lines or ambient work bubbles, and the Brain shows your real note count
+(0 if your vault is empty) instead of the sample graph. Only real tasks, routines, approvals,
+chats and connectors ever show up; an agent with nothing real to do simply sits idle. The choice
+is remembered (`localStorage`) and only ever shown once the office confirms it is actually live —
+the demo (`dist/command-centre-v2.html` opened as a file) always runs its usual demo.
+
 ## Make it yours
 
 `office.config.json`:
