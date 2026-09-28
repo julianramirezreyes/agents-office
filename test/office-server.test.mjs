@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
-import { createOfficeRuntime } from '../serve.mjs';
+import { attachShutdownHandlers, createOfficeRuntime } from '../serve.mjs';
 import { loadConfig } from '../config.mjs';
 import { loadRoster } from '../roster.mjs';
 
@@ -25,10 +25,11 @@ function fixture() {
   return { root, dataRoot, brainPath };
 }
 
-async function startRuntime({ office, provider, port, ...paths }) {
+async function startRuntime({ office, provider, port, runtimeOptions = {}, ...paths }) {
   const runtime = await createOfficeRuntime({
     officeConfig: { ...loadConfig(), office, port, dataRoot: paths.dataRoot, brainPath: paths.brainPath },
     provider,
+    ...runtimeOptions,
     ...paths,
   });
   runtimes.push(runtime);
@@ -123,4 +124,89 @@ test('codexRoster_usesOnlyItsIsolatedBrainCustomization', () => {
   const roster = loadRoster(paths.brainPath, { office: 'codex' });
   assert.equal(roster.agents.find(agent => agent.id === 'elead').name, 'CODEX EMAIL LEAD');
   assert.deepEqual(roster.files, ['brain/Agents Office/agents.json']);
+});
+
+test('codexRuntime_neverCallsClaudeUsageOrMcpAndDoesNotAdvertiseClaude', async () => {
+  const paths = fixture();
+  let usageCalls = 0, mcpCalls = 0, credentialReads = 0;
+  const originalReadFileSync = fs.readFileSync;
+  const originalPath = process.env.PATH;
+  fs.readFileSync = function (file, ...args) {
+    if (String(file).endsWith('.claude/.credentials.json')) {
+      credentialReads++;
+      throw new Error('credential access blocked by test');
+    }
+    return originalReadFileSync.call(this, file, ...args);
+  };
+  process.env.PATH = paths.root;
+  try {
+    const { base } = await startRuntime({ ...paths, office: 'codex', port: 0, runtimeOptions: {
+      usageFetch: async () => { usageCalls++; return { ok: true, source: 'claude' }; },
+      discoverMcp: async () => { mcpCalls++; return []; },
+    } });
+    const health = await fetch(`${base}/api/health`).then(r => r.json());
+    await fetch(`${base}/api/usage?refresh=1`).then(r => r.json());
+    await fetch(`${base}/api/mcp?refresh=1`).then(r => r.json());
+
+    assert.equal(usageCalls, 0);
+    assert.equal(mcpCalls, 0);
+    assert.equal(credentialReads, 0);
+    assert.equal(health.provider, 'codex');
+    assert.notEqual(health.backend, 'claude-cli');
+    assert.equal(health.model, null);
+    assert.deepEqual(health.models, []);
+    assert.equal(health.tools, false);
+    assert.equal(health.teams.enabled, false);
+    assert.equal(health.browser.on, false);
+    assert.deepEqual(health.mcp.servers, []);
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
+});
+
+test('officeRuntime_closeReportsPendingDetachedTaskAndLetsItPersistAfterGrace', async () => {
+  const paths = fixture();
+  fs.writeFileSync(path.join(paths.dataRoot, 'tasks.json'), JSON.stringify([{
+    id: 'slow-task', dept: 'emails', agent: 'elead', title: 'Slow task', text: 'Wait for release', state: 'next',
+  }]));
+  let releaseTask;
+  let markStarted;
+  const started = new Promise(resolve => { markStarted = resolve; });
+  const runner = new Promise(resolve => { releaseTask = resolve; });
+  const { runtime, base } = await startRuntime({ ...paths, office: 'codex', port: 0, provider: { id: 'codex' }, runtimeOptions: {
+    taskRunner: async () => { markStarted(); return runner; },
+  } });
+
+  const request = fetch(`${base}/api/tasks/slow-task/run`, { method: 'POST' }).catch(error => error);
+  await started;
+  const stopped = await runtime.close({ graceMs: 10 });
+  runtimes.splice(runtimes.indexOf(runtime), 1);
+
+  assert.equal(stopped.drained, false);
+  assert.equal(stopped.pendingWork, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(paths.dataRoot, 'tasks.json'), 'utf8'))[0].state, 'doing');
+  releaseTask({ result: 'Persisted after shutdown began', read: [], tools: [], used: [], skills: [] });
+  await request;
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const task = JSON.parse(fs.readFileSync(path.join(paths.dataRoot, 'tasks.json'), 'utf8'))[0];
+  assert.equal(task.state, 'done');
+  assert.equal(task.result, 'Persisted after shutdown began');
+});
+
+test('shutdownEntrypoint_doesNotForceExitWhileWorkRemainsPending', async () => {
+  const handlers = new (await import('node:events')).EventEmitter();
+  let exits = 0;
+  const warnings = [];
+  handlers.exit = () => { exits++; };
+  const detach = attachShutdownHandlers({ close: async () => ({ drained: false, pendingWork: 1 }) }, {
+    processRef: handlers, warn: message => warnings.push(message),
+  });
+  handlers.emit('SIGTERM');
+  await new Promise(resolve => setImmediate(resolve));
+  detach();
+
+  assert.equal(exits, 0);
+  assert.match(warnings.join('\n'), /1.*pending/i);
 });
