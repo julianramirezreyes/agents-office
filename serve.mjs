@@ -649,14 +649,16 @@ async function close({ graceMs = 5000 } = {}) {
   if (routineTimer) clearInterval(routineTimer);
   const stopped = new Promise(resolve => server.close(resolve));
   let graceTimer;
-  let expired = false;
-  const timeout = new Promise(resolve => { graceTimer = setTimeout(() => { expired = true; resolve(false); }, Math.max(0, graceMs)); });
+  const timeout = new Promise(resolve => { graceTimer = setTimeout(() => resolve(false), Math.max(0, graceMs)); });
   const drained = await Promise.race([
-    (async () => { while (activeWork.size) await Promise.allSettled([...activeWork]); return true; })(),
+    Promise.all([
+      (async () => { while (activeWork.size) await Promise.allSettled([...activeWork]); })(),
+      stopped,
+    ]).then(() => true),
     timeout,
   ]);
   clearTimeout(graceTimer);
-  if (!drained || expired) server.closeAllConnections?.();
+  if (!drained) server.closeAllConnections?.();
   await stopped;
   // State transitions are persisted synchronously; final snapshot captures any last mutation.
   save(load());

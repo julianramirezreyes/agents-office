@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -210,4 +211,22 @@ test('shutdownEntrypoint_doesNotForceExitWhileWorkRemainsPending', async () => {
 
   assert.equal(exits, 0);
   assert.match(warnings.join('\n'), /1.*pending/i);
+});
+
+test('officeRuntime_closeDeadlineAlsoCoversAnIncompleteHttpRequest', async () => {
+  const paths = fixture();
+  const { runtime } = await startRuntime({ ...paths, office: 'codex', port: 0 });
+  const socket = net.createConnection(runtime.server.address().port, '127.0.0.1');
+  await new Promise((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
+  socket.write('POST /api/chat HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{"text":"partial');
+
+  const closing = runtime.close({ graceMs: 20 });
+  const withinDeadline = await Promise.race([closing.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), 150))]);
+  socket.destroy(); // Release the pre-fix close(), which waited forever for this request body.
+  const result = await closing;
+  runtimes.splice(runtimes.indexOf(runtime), 1);
+
+  assert.equal(withinDeadline, true, 'close() should enforce graceMs for sockets even when no task has started');
+  assert.equal(result.drained, false);
+  assert.equal(result.pendingWork, 0);
 });
