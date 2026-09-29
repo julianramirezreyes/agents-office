@@ -373,8 +373,23 @@ async function chat(agentId, text, history) {
     'Use the company notes; say when something is not in them. If the owner asks you to look something up, use your tools. Nothing outbound is sent without the owner\'s explicit say-so.\n\n' +
     `${mcp.promptText(a.tools)}\n\nCOMPANY NOTES\n${businessContext(index)}\n\nRELEVANT NOTES\n${contextText(index, read)}\n\nYOUR RECENT TASKS\n${mine || '—'}`;
   const convo = (history || []).slice(-8).map(m => `${m.who === 'user' ? 'Owner' : a.name}: ${m.text}`).join('\n');
+  const prompt = `${system}\n\n${convo ? `CONVERSATION HISTORY\n${convo}\n\n` : ''}Owner: ${text}\n${a.name}:`;
+  if (PROVIDER === 'codex') {
+    if (typeof codexProvider?.runChat !== 'function') return { provider: PROVIDER, providerStatus: 'blocked', error: 'Codex chat is not available in this office runtime' };
+    const result = await codexProvider.runChat({ prompt });
+    return { reply: result.text || '', read, tools: [], used: [], provider: PROVIDER, providerStatus: result.status || 'failed', error: result.error || null, usage: result.usage, threadId: result.threadId };
+  }
   const { text: reply, tools } = await askX(system, (convo ? convo + '\n' : '') + `Owner: ${text}\n${a.name}:`, { maxTokens: 1200, model: modelFor({ agent: a.model, office: cfg.model }).model, effort: effortFor({ agent: a.effort, office: cfg.effort, model: modelFor({ agent: a.model, office: cfg.model }).model }).effort });
-  return { reply, read, tools: toolKeys(tools), used: mcp.namesOf(tools) };
+  return { reply, read, tools: toolKeys(tools), used: mcp.namesOf(tools), provider: PROVIDER, providerStatus: 'completed' };
+}
+function boundedChatHistory(history, currentText) {
+  const messages = (Array.isArray(history) ? history.slice(-64) : [])
+    .filter(message => message && ['user', 'agent'].includes(message.who) && typeof message.text === 'string')
+    .map(({ who, text }) => ({ who, text: text.trim().slice(-4000) }))
+    .filter(message => message.text);
+  const last = messages.at(-1);
+  if (last?.who === 'user' && last.text === currentText) messages.pop();
+  return messages.slice(-8);
 }
 
 /* ---------- routines: the office's own clock (V3.5) ---------- */
@@ -632,22 +647,42 @@ const server = http.createServer(async (req, res) => {
     }
     if (m && req.method === 'DELETE') { save(load().filter(t => t.id !== m[1])); return json(res, 200, { ok: true }); }
     if (url.pathname === '/api/chat' && req.method === 'POST') {
-      if (PROVIDER !== 'claude') return json(res, 501, { error: `Chat is not available for provider "${PROVIDER}"` });
+      const length = +req.headers['content-length'] || 0;
+      if (length > 200000) return json(res, 413, { error: 'payload too large', provider: PROVIDER, providerStatus: 'blocked' });
       const { agent, text, history } = await body(req);
-      if (!text || !String(text).trim()) return json(res, 400, { error: 'empty message' });
-      const a = AGENTS.find(x => x.id === agent); if (!a) return json(res, 400, { error: 'unknown agent' });
-      if (!onboard.active(DATA, a.department)) { // V3.5: "every weekday at 8am, …" · "routines" · "pause …" · "run … now" — unless the lead is mid-interview
-        const rc = await routinesChat(a, String(text).trim());
-        if (rc) return json(res, 200, { reply: rc.reply, read: [], tools: [], interview: false, routine: rc.routine || null, routines: true });
+      if (typeof text !== 'string' || !text.trim()) return json(res, 400, { error: 'message must be a non-empty string', provider: PROVIDER, providerStatus: 'blocked' });
+      if (typeof agent !== 'string' || !AGENTS.some(x => x.id === agent)) return json(res, 400, { error: 'unknown agent', provider: PROVIDER, providerStatus: 'blocked' });
+      const a = AGENTS.find(x => x.id === agent);
+      const message = text.trim();
+      const boundedHistory = boundedChatHistory(history, message);
+      if (PROVIDER === 'claude') {
+        if (!onboard.active(DATA, a.department)) { // V3.5: "every weekday at 8am, …" · "routines" · "pause …" · "run … now" — unless the lead is mid-interview
+          const rc = await routinesChat(a, message);
+          if (rc) return json(res, 200, { reply: rc.reply, read: [], tools: [], interview: false, routine: rc.routine || null, routines: true, provider: PROVIDER, providerStatus: 'completed' });
+        }
+        if (leadOf(a.department).id === a.id) { // the department lead can run the set-up interview
+          refreshSkills();
+          const o = await onboard.handle(message, { dept: a.department, deptName: DEPTS[a.department].name, lead: a, agents: AGENTS.filter(x => x.department === a.department),
+            connected: mcpSummary().servers?.filter(x => x.status === 'connected').map(x => x.name || x.key) || [], brainPath: BRAIN, dataDir: DATA, ask, business: cfg.name, afterWrite: refreshSkills });
+          if (o) { if (o.wrote) console.log(`★ ${a.name} set up ${DEPTS[a.department].name}: ${o.wrote.briefs.length} briefs${o.wrote.skill ? ', skill ' + o.wrote.skill.name : ''}`); return json(res, 200, { reply: o.reply, read: [], tools: [], interview: !o.wrote, setup: setupMap(), provider: PROVIDER, providerStatus: 'completed' }); }
+        }
       }
-      if (leadOf(a.department).id === a.id) { // the department lead can run the set-up interview
-        refreshSkills();
-        const o = await onboard.handle(String(text).trim(), { dept: a.department, deptName: DEPTS[a.department].name, lead: a, agents: AGENTS.filter(x => x.department === a.department),
-          connected: mcpSummary().servers?.filter(x => x.status === 'connected').map(x => x.name || x.key) || [], brainPath: BRAIN, dataDir: DATA, ask, business: cfg.name, afterWrite: refreshSkills });
-        if (o) { if (o.wrote) console.log(`★ ${a.name} set up ${DEPTS[a.department].name}: ${o.wrote.briefs.length} briefs${o.wrote.skill ? ', skill ' + o.wrote.skill.name : ''}`); return json(res, 200, { reply: o.reply, read: [], tools: [], interview: !o.wrote, setup: setupMap() }); }
+      if (!['claude', 'codex'].includes(PROVIDER)) return json(res, 501, { error: `Chat is not available for provider "${PROVIDER}"`, provider: PROVIDER, providerStatus: 'blocked' });
+      try {
+        const r = await chat(agent, message, boundedHistory);
+        if (r.providerStatus !== 'completed') {
+          console.warn(`[chat] provider=${PROVIDER} status=${r.providerStatus || 'failed'}`);
+          const status = r.providerStatus === 'blocked' ? 503 : 502;
+          const error = status === 503
+            ? `${PROVIDER === 'codex' ? 'Codex' : 'Claude'} chat is blocked by this office's configured policy.`
+            : `${PROVIDER === 'codex' ? 'Codex' : 'Claude'} chat failed. Check the local provider status and retry.`;
+          return json(res, status, { error, provider: PROVIDER, providerStatus: r.providerStatus || 'failed' });
+        }
+        return json(res, 200, { ...r, error: null, interview: false });
+      } catch {
+        console.warn(`[chat] provider=${PROVIDER} status=failed`);
+        return json(res, 502, { error: `${PROVIDER === 'codex' ? 'Codex' : 'Claude'} chat failed. Check the local provider status and retry.`, provider: PROVIDER, providerStatus: 'failed' });
       }
-      const r = await chat(agent, String(text).trim(), history);
-      return json(res, 200, { ...r, interview: false });
     }
     json(res, 404, { error: 'not found' });
   } catch (e) { if (e.statusCode === 400) return json(res, 400, { error: e.message }); console.error(e); json(res, 500, { error: e.message }); }

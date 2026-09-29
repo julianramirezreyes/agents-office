@@ -10,6 +10,17 @@ export function providerDisplayName(provider) {
   return provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : 'office runtime';
 }
 
+export function chatHistoryForRequest(history) {
+  return (Array.isArray(history) ? history : [])
+    .filter(message => message && ['user', 'agent'].includes(message.who) && typeof message.text === 'string')
+    .map(({ who, text }) => ({ who, text: text.slice(-4000) }))
+    .slice(-8);
+}
+
+export function chatFailureMessage(provider, reason) {
+  return `${providerDisplayName(provider)} chat failed: ${String(reason || 'request unavailable').slice(0, 240)}`;
+}
+
 export function modelBrandsForProvider(provider) {
   return provider === 'claude' ? ['claude', 'chatgpt'] : [];
 }

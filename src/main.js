@@ -16,8 +16,10 @@ import { initBrain } from './brain.js';
 import { initHero, HERO } from './hero.js';
 import { initI18n } from './i18n.js'; // V3.7: the EN/ES toggle in the top bar (inert in demo mode)
 import { readRealOnly, writeRealOnly, shouldSeedDemo, shouldShowRealToggle, realOnly } from './real-only.js'; // V3.7: real-only
+import { chatFailureMessage, chatHistoryForRequest } from './office-ui.js';
 if (HERO) document.body.classList.add('hero'); // the website hero: no Sahni.ai mark or licence line on top of the page that already carries them // sahni.ai/custom hero mode (16 Sep 2026): opt-in via window.HERO, no-op otherwise
 let tasks = null; // V3 task boards — initialised after the rail constants exist
+let activeProvider = 'office runtime';
 
 /* ---------- renderer / scene / camera ---------- */
 const canvas = document.getElementById('scene');
@@ -840,6 +842,7 @@ function sendChat(text) {
   const id = modalOpen;
   if (!id || !text.trim()) return;
   const r = R[id];
+  const history = chatHistoryForRequest(chatHist[id]);
   chatPush(id, { who: 'user', text });
   document.getElementById('mIn').value = '';
   const low = text.toLowerCase();
@@ -856,8 +859,12 @@ function sendChat(text) {
     if (tasks && tasks.isLive()) { // LIVE: a real conversation with the agent, grounded in the brain
       chatPush(id, { who: 'work', i: '…', text: `${r.a.name} is thinking` });
       fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ agent: id, text, history: chatHist[id].filter(m => m.who === 'user' || m.who === 'agent').slice(-8) }) })
-        .then(async res => { if (!res.ok) throw new Error((await res.json()).error || res.statusText); return res.json(); })
+        body: JSON.stringify({ agent: id, text, history }) })
+        .then(async res => {
+          const data = await res.json();
+          if (!res.ok) { const error = new Error(data.error || res.statusText); error.provider = data.provider; throw error; }
+          return data;
+        })
         .then(j => {
           const h = chatHist[id]; const k = h.findIndex(m => m.who === 'work' && m.text === `${r.a.name} is thinking`); if (k >= 0) h.splice(k, 1);
           chatPush(id, { who: 'agent', text: j.reply });
@@ -865,7 +872,7 @@ function sendChat(text) {
           if (j.read) for (const n of j.read.slice(0, 2)) brain.readNote(id, n);
           if (j.tools && j.tools.length) mcp.onToolsUsed(id, j.tools);
         })
-        .catch(e => chatPush(id, { who: 'agent', text: `I couldn't reach Claude (${e.message}).` }));
+        .catch(e => chatPush(id, { who: 'agent', text: chatFailureMessage(e.provider || activeProvider, e.message) }));
       return;
     }
     const hit = (r.v1.chat || []).find(c => c.k.some(k => low.includes(k)));
@@ -1409,7 +1416,7 @@ function revealRealToggle(live) {
 tasks = initTasks({
   hud, R, deptRT, RAIL_SIDE, spawnEmote, chatPush, chatHist, feedPush, zoomToApproval, enterFocus, openAgent, esc,
   brainWrite: (id, title) => brain.write(id, title), brain,
-  onLive: (h) => { document.querySelector('#topbar .brand .ver').textContent = 'BETA'; document.title = `${h.name} — Agents Office`; brain.setOwner(h.name); brain.setQuiet(true); applyRoster(h.agents); revealRealToggle(true); updateBillboards(); if (realOnly()) refreshBrainTag(); }, // V3.7: real-only — repaint the pod-card KPIs and the Brain pill now that realOnly() is settled and the real graph (if any) is in
+  onLive: (h) => { activeProvider = h.provider || activeProvider; document.querySelector('#topbar .brand .ver').textContent = 'BETA'; document.title = `${h.name} — Agents Office`; brain.setOwner(h.name); brain.setQuiet(true); applyRoster(h.agents); revealRealToggle(true); updateBillboards(); if (realOnly()) refreshBrainTag(); }, // V3.7: real-only — repaint the pod-card KPIs and the Brain pill now that realOnly() is settled and the real graph (if any) is in
   onDemoFallback: () => { revealRealToggle(false); maybeSeedHistory(false); }, // V3.7: real-only — /api/health said not-live; fall back to demo
   onTools: (agentId, keys) => mcp.onToolsUsed(agentId, keys),
   requestApproval, setStuck: setStuckLive,

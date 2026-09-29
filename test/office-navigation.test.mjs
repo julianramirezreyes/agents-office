@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { fromSummary, loadConnectors } from '../src/connectors.js';
-import { emptyConnectorMessage, escapeHtml, modelBrandsForProvider, officeControls, providerDisplayName, providerUsageStatus, updateOfficeSwitch } from '../src/office-ui.js';
+import { chatFailureMessage, chatHistoryForRequest, emptyConnectorMessage, escapeHtml, modelBrandsForProvider, officeControls, providerDisplayName, providerUsageStatus, updateOfficeSwitch } from '../src/office-ui.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const shell = fs.readFileSync(path.join(root, 'src/shell.html'), 'utf8');
@@ -63,6 +63,26 @@ test('office_switchShowsDestinationReasonWithoutChangingSourceReadiness', async 
 
 test('office_switchLinkHasAccessibleName', () => {
   assert.match(shell, /<a\b[^>]*aria-label="Switch office"/);
+});
+
+test('codexChatHistoryExcludesTheCurrentMessageAndKeepsOnlyRecentUserAndAgentTurns', () => {
+  const history = [
+    { who: 'user', text: 'oldest' },
+    { who: 'work', text: 'internal progress' },
+    ...Array.from({ length: 8 }, (_, index) => ({ who: index % 2 ? 'agent' : 'user', text: `turn-${index + 1}` })),
+  ];
+
+  const result = chatHistoryForRequest(history);
+
+  assert.equal(result.length, 8);
+  assert.deepEqual(result[0], { who: 'user', text: 'turn-1' });
+  assert.deepEqual(result[7], { who: 'agent', text: 'turn-8' });
+  assert.ok(result.every(message => ['user', 'agent'].includes(message.who)));
+});
+
+test('chatFailureMessageNamesTheProviderForEachOffice', () => {
+  assert.equal(chatFailureMessage('codex', 'request failed'), 'Codex chat failed: request failed');
+  assert.equal(chatFailureMessage('claude', 'request failed'), 'Claude chat failed: request failed');
 });
 
 test('office_switchAcceptsTheConfiguredIPv6LoopbackRuntime', async () => {

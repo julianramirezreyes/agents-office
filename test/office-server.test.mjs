@@ -100,6 +100,101 @@ test('server_reportsOfficeProviderInHealth', async () => {
   assert.equal(health.provider, 'codex');
 });
 
+test('codexChat_usesAgentContextAndBoundedHistoryWithoutDuplicatingCurrentMessage', async () => {
+  const paths = fixture();
+  const agent = { id: 'fixture-email', department: 'emails', lead: true, name: 'EMAILS ASSISTANT', role: 'Writer', does: 'writes email copy', brief: 'Use the owner voice.', tools: [] };
+  fs.writeFileSync(path.join(paths.dataRoot, 'tasks.json'), JSON.stringify([
+    { id: 'recent-task', agent: agent.id, state: 'done', title: 'Prepared launch brief' },
+  ]));
+  fs.writeFileSync(path.join(paths.brainPath, 'voice-notes.md'), 'The company voice is warm and concise.');
+  const calls = [];
+  const provider = {
+    id: 'codex',
+    async runTask() { throw new Error('chat must not use runTask'); },
+    async runChat(input) {
+      calls.push(input);
+      return { status: 'completed', provider: 'codex', text: 'Codex reply', threadId: 'chat-thread', usage: { input_tokens: 30, output_tokens: 4 } };
+    },
+  };
+  const { base } = await startRuntime({ ...paths, office: 'codex', port: 0, provider, runtimeOptions: {
+    rosterLoader: () => ({ agents: [agent], problems: [], customised: 1, briefed: 0, files: [] }),
+  } });
+  const history = Array.from({ length: 10 }, (_, index) => ({ who: index % 2 ? 'agent' : 'user', text: `prior-message-${index + 1}` }));
+  history.push({ who: 'user', text: 'Current voice request' });
+
+  const response = await fetch(`${base}/api/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ agent: agent.id, text: 'Current voice request', history }),
+  });
+  const result = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(result.provider, 'codex');
+  assert.equal(result.providerStatus, 'completed');
+  assert.equal(result.reply, 'Codex reply');
+  assert.deepEqual(result.read, ['voice-notes']);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].prompt, /You are EMAILS ASSISTANT/);
+  assert.match(calls[0].prompt, /Use the owner voice/);
+  assert.match(calls[0].prompt, /warm and concise/);
+  assert.match(calls[0].prompt, /Prepared launch brief/);
+  assert.match(calls[0].prompt, /Owner: prior-message-3/);
+  assert.match(calls[0].prompt, /EMAILS ASSISTANT: prior-message-10/);
+  assert.doesNotMatch(calls[0].prompt, /prior-message-1\n/);
+  assert.equal(calls[0].prompt.split('Owner: Current voice request').length - 1, 1);
+});
+
+test('codexChat_rejectsInvalidAgentOrMessageBeforeCallingProvider', async () => {
+  const paths = fixture();
+  let calls = 0;
+  const provider = { id: 'codex', async runTask() {}, async runChat() { calls++; return { status: 'completed', text: 'unexpected' }; } };
+  const { base } = await startRuntime({ ...paths, office: 'codex', port: 0, provider });
+  const send = body => fetch(`${base}/api/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+
+  const unknownAgent = await send({ agent: 'not-an-agent', text: 'Hello' });
+  const emptyMessage = await send({ agent: 'elead', text: '   ' });
+  const nonStringMessage = await send({ agent: 'elead', text: { secret: 'not text' } });
+
+  assert.equal(unknownAgent.status, 400);
+  assert.equal(emptyMessage.status, 400);
+  assert.equal(nonStringMessage.status, 400);
+  assert.equal(calls, 0);
+});
+
+test('codexChat_returnsSafeProviderFailureWithoutLoggingMessagesOrSecrets', async () => {
+  const paths = fixture();
+  const message = 'private owner message never log this';
+  const secret = 'token=not-for-logs';
+  const provider = {
+    id: 'codex', async runTask() {},
+    async runChat() { return { status: 'failed', provider: 'codex', error: `SDK exploded ${secret}` }; },
+  };
+  const { base } = await startRuntime({ ...paths, office: 'codex', port: 0, provider });
+  const logs = [];
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.warn = (...values) => logs.push(values.join(' '));
+  console.error = (...values) => logs.push(values.join(' '));
+  try {
+    const response = await fetch(`${base}/api/chat`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: 'elead', text: message }),
+    });
+    const result = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(result.provider, 'codex');
+    assert.equal(result.providerStatus, 'failed');
+    assert.doesNotMatch(result.error, /SDK exploded|token=/i);
+    assert.equal(logs.length, 1);
+    assert.doesNotMatch(logs.join('\n'), /SDK exploded|token=|private owner message/i);
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+});
+
 test('serverUsesInjectedFixtureRosterInsteadOfCheckoutLocalRoster', async () => {
   const paths = fixture();
   const fixtureRoster = { agents: [{ id: 'fixture-agent', department: 'emails', lead: true, name: 'FIXTURE AGENT', tools: [] }], problems: [], customised: 1, briefed: 0, files: ['fixture-roster.json'] };
