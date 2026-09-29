@@ -14,7 +14,7 @@ Dejar un único worktree Git en `/home/julian/proyectos/agents-office`, sobre `m
 
 ## Plan y evidencia
 
-- [ ] **WC-01 — Consolidar estado local y worktrees.** Confirmar ramas, ancestros, estados y manifiestos; crear la rama operativa desde `main`; copiar con destino exclusivo y verificar hashes; retirar solo originales verificados y cachés autorizadas; eliminar ambos worktrees secundarios sin forzar; integrar el registro operativo en `main`.
+- [x] **WC-01 — Consolidar estado local y worktrees.** Confirmar ramas, ancestros, estados y manifiestos; crear la rama operativa desde `main`; copiar con destino exclusivo y verificar hashes; retirar solo originales verificados y cachés autorizadas; eliminar ambos worktrees secundarios sin forzar; integrar el registro operativo en `main`.
   - Ruta: delegada, por múltiples ubicaciones y operaciones con riesgo de pérdida de datos.
   - Evidencia inicial: `feat/dual-offices` y `feat/live-translation` son ancestros de `main`; los tres worktrees y sus estados se inspeccionaron antes de modificar archivos.
   - Criterios de aceptación: un solo worktree en el checkout principal sobre `main`; archivos preservados con hashes idénticos; ramas de funcionalidad ancestrales; ningún archivo local ajeno sobrescrito; commit convencional de este registro.
@@ -25,7 +25,7 @@ Dejar un único worktree Git en `/home/julian/proyectos/agents-office`, sobre `m
 
 - TDD estricto: habilitado por las instrucciones del proyecto. No hay cambio de comportamiento que permita un ciclo RED → GREEN → REFACTOR; la comprobación funcional aplicable es `npm run check`.
 - Estrategia de entrega: `ask-on-risk`; pronóstico de cambios escritos menor a 400 líneas. Sin entrega remota solicitada.
-- Estado del espejo Engram: creado bajo `odd/workspace-consolidation/tasks`; requiere sincronización al cerrar la tarea.
+- Estado del espejo Engram: actualizado bajo `odd/workspace-consolidation/tasks` al cerrar la tarea.
 
 ## Resultados observados en la rama operativa
 
@@ -35,8 +35,9 @@ Dejar un único worktree Git en `/home/julian/proyectos/agents-office`, sobre `m
 - El cambio de rama del checkout principal preservó por hash siete archivos protegidos de la oficina Claude y mantuvo `.codegraph/` y sus archivos no rastreados. El contenido de Codex permanece separado en sus rutas locales.
 - En la rama operativa, `npm run check` con `PATH` limitado, `HOME` y configuraciones de CLI temporales, y sin claves de proveedor terminó con código 0: compilación, navegador y HTTP aprobados; 139 pruebas aprobadas, 0 fallidas; llamadas a proveedor, uso y MCP: 0/0/0. `git diff --check` terminó con código 0.
 - `launcher.mjs` sigue exportando `createLauncher` como función. El script `start` sigue siendo `node serve.mjs`; esta operación no cambió el comando de inicio ni ejecutó el launcher.
-- Pendiente para el cierre: commit convencional de este registro, integración local explícita en `main` y repetición de las comprobaciones en el resultado final.
+- El registro se confirmó en `cf63f04361d7a76f32bdfd127b99e1e67df2e046` y se integró explícitamente en `main` mediante `e47debb77de7de9146cc49798feadeedbd8ebc0f`. En `main`, la segunda ejecución aislada de `npm run check` terminó con código 0: compilación, navegador y HTTP aprobados; 139 pruebas aprobadas, 0 fallidas; llamadas a proveedor, uso y MCP: 0/0/0.
+- La verificación estructural final confirmó un solo worktree, `main`, los 12 SHA-256 conservados, las tres ramas como ancestros, los cinco grupos de rutas locales protegidas y únicamente los dos archivos no rastreados preexistentes. `git diff --check` terminó con código 0. No se hizo push ni PR.
 
 ## Siguiente paso
 
-Integrar la rama operativa en `main`, repetir las comprobaciones y registrar el resultado final.
+No queda una acción local pendiente. La entrega remota sigue sin autorización.
