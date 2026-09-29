@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -80,11 +81,20 @@ test('office_switchAcceptsTheConfiguredIPv6LoopbackRuntime', async () => {
 test('navigationDoesNotCallTaskCancellation', async () => {
   const requested = [];
   const link = fakeLink();
-  await updateOfficeSwitch({
-    office: 'codex', launcherUrl: 'http://127.0.0.1:4519', link, status: { textContent: '' },
-    fetcher: async url => { requested.push(url); return { ok: true, json: async () => ({ offices: { claude: { office: 'claude', provider: 'claude', status: 'ready', url: 'http://127.0.0.1:4520/' } } }) }; },
-  });
-  assert.deepEqual(requested, ['http://127.0.0.1:4519/api/health']);
+  const target = http.createServer((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ office: 'claude', visited: true })); });
+  await new Promise(resolve => target.listen(0, '127.0.0.1', resolve));
+  const targetUrl = `http://127.0.0.1:${target.address().port}/`;
+  try {
+    await updateOfficeSwitch({
+      office: 'codex', launcherUrl: 'http://127.0.0.1:4519', link, status: { textContent: '' },
+      fetcher: async url => { requested.push(url); return { ok: true, json: async () => ({ offices: { claude: { office: 'claude', provider: 'claude', status: 'ready', url: targetUrl } } }) }; },
+    });
+    assert.deepEqual(requested, ['http://127.0.0.1:4519/api/health']);
+    assert.equal(link.href, targetUrl);
+    assert.deepEqual(await fetch(link.href).then(response => response.json()), { office: 'claude', visited: true });
+  } finally {
+    await new Promise(resolve => target.close(resolve));
+  }
 });
 
 test('codexControlsExcludeClaudeAliasesAndUnsupportedTools', () => {

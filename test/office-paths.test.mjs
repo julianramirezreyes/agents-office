@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { loadConfig, ROOT } from '../config.mjs';
+import { loadConfig } from '../config.mjs';
 import { resolveOfficePaths, validateOfficePair } from '../office-paths.mjs';
 
 const temporary = fn => {
@@ -14,28 +14,16 @@ const temporary = fn => {
 
 const isolatedEnv = values => ({ ...values });
 
-test('loadConfig_withoutOffice_keepsClaudeDefaults', () => {
-  const old = Object.fromEntries(['AO_NAME', 'AO_BRAIN', 'AO_CLAUDE_BRAIN', 'AO_CLAUDE_PORT', 'PORT', 'AO_MODEL'].map(key => [key, process.env[key]]));
-  for (const key of Object.keys(old)) delete process.env[key];
-  try {
-    const config = loadConfig();
-    assert.equal(config.port, 4520);
-    assert.equal(config.brain, './brain');
-    assert.equal(config.brainPath, path.join(ROOT, 'brain'));
-  } finally {
-    for (const [key, value] of Object.entries(old)) value === undefined ? delete process.env[key] : process.env[key] = value;
-  }
-});
+test('loadConfig_withoutOffice_keepsClaudeDefaults', () => temporary(root => {
+  const config = loadConfig({ office: 'claude', env: {}, root });
+  assert.equal(config.port, 4520);
+  assert.equal(config.brain, './brain');
+  assert.equal(config.brainPath, path.join(root, 'brain'));
+}));
 
-test('loadConfig_withoutOptionsStillAcceptsLegacyAndClaudePortEnvironment', () => {
-  const old = { PORT: process.env.PORT, AO_CLAUDE_PORT: process.env.AO_CLAUDE_PORT };
-  delete process.env.PORT;
-  process.env.AO_CLAUDE_PORT = '4610';
-  try { assert.equal(loadConfig().port, 4610); }
-  finally {
-    for (const [key, value] of Object.entries(old)) value === undefined ? delete process.env[key] : process.env[key] = value;
-  }
-});
+test('loadConfig_withExplicitFixtureRootAcceptsClaudePortEnvironment', () => temporary(root => {
+  assert.equal(loadConfig({ office: 'claude', env: { AO_CLAUDE_PORT: '4610' }, root }).port, 4610);
+}));
 
 test('loadConfig_codexDoesNotInheritClaudeProviderDefaults', () => temporary(root => {
   fs.writeFileSync(path.join(root, 'office.config.json'), JSON.stringify({ port: 4520, brain: './brain', model: 'sonnet' }));

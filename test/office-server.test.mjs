@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -7,11 +8,15 @@ import { afterEach, test } from 'node:test';
 import { attachShutdownHandlers, createOfficeRuntime } from '../serve.mjs';
 import { loadConfig } from '../config.mjs';
 import { loadRoster } from '../roster.mjs';
+import { defaults as defaultRoster } from '../roster.mjs';
+import { createLauncher } from '../launcher.mjs';
 
 const runtimes = [];
 const tempRoots = [];
+const launchers = [];
 
 afterEach(async () => {
+  await Promise.all(launchers.splice(0).map(launcher => launcher.close({ graceMs: 0 })));
   await Promise.all(runtimes.splice(0).map(runtime => runtime.close({ graceMs: 0 })));
   for (const root of tempRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
@@ -27,16 +32,21 @@ function fixture() {
 }
 
 async function startRuntime({ office, provider, port, runtimeOptions = {}, ...paths }) {
+  const officeConfig = loadConfig({ office, env: {}, root: paths.root });
+  const rosterLoader = runtimeOptions.rosterLoader || ((brainPath, options) => options.office === 'codex'
+    ? loadRoster(brainPath, options)
+    : { agents: defaultRoster(), problems: [], customised: 0, briefed: 0, files: [] });
   const runtime = await createOfficeRuntime({
-    officeConfig: { ...loadConfig(), office, port, dataRoot: paths.dataRoot, brainPath: paths.brainPath },
+    officeConfig: { ...officeConfig, office, port, dataRoot: paths.dataRoot, brainPath: paths.brainPath },
     provider,
+    rosterLoader,
     ...runtimeOptions,
     ...paths,
   });
   runtimes.push(runtime);
   await runtime.start();
   const address = runtime.server.address();
-  return { runtime, base: `http://127.0.0.1:${address.port}` };
+  return { runtime, officeConfig, base: `http://127.0.0.1:${address.port}` };
 }
 
 test('createOfficeRuntime_bindsProviderAndOfficeIdentityAtStart', async () => {
@@ -90,12 +100,24 @@ test('server_reportsOfficeProviderInHealth', async () => {
   assert.equal(health.provider, 'codex');
 });
 
+test('serverUsesInjectedFixtureRosterInsteadOfCheckoutLocalRoster', async () => {
+  const paths = fixture();
+  const fixtureRoster = { agents: [{ id: 'fixture-agent', department: 'emails', lead: true, name: 'FIXTURE AGENT', tools: [] }], problems: [], customised: 1, briefed: 0, files: ['fixture-roster.json'] };
+  const { base } = await startRuntime({ ...paths, office: 'claude', port: 0, provider: { id: 'claude' }, runtimeOptions: {
+    rosterLoader: () => fixtureRoster,
+  } });
+  const health = await fetch(`${base}/api/health`).then(response => response.json());
+  assert.deepEqual(health.roster, { customised: 1, briefed: 0, files: ['fixture-roster.json'], problems: [] });
+  assert.equal(health.agents[0].name, 'FIXTURE AGENT');
+});
+
 test('server_shutdownStopsAcceptingWorkAndPersistsTaskState', async () => {
   const paths = fixture();
   fs.writeFileSync(path.join(paths.dataRoot, 'tasks.json'), JSON.stringify([{ id: 'keep', title: 'persist me' }]));
   const runtime = await createOfficeRuntime({
-    officeConfig: { ...loadConfig(), office: 'claude', port: 0, dataRoot: paths.dataRoot, brainPath: paths.brainPath },
+    officeConfig: { ...loadConfig({ office: 'claude', env: {}, root: paths.root }), office: 'claude', port: 0, dataRoot: paths.dataRoot, brainPath: paths.brainPath },
     provider: { id: 'claude' },
+    rosterLoader: () => ({ agents: defaultRoster(), problems: [], customised: 0, briefed: 0, files: [] }),
     ...paths,
   });
   runtimes.push(runtime);
@@ -110,11 +132,13 @@ test('server_shutdownStopsAcceptingWorkAndPersistsTaskState', async () => {
 });
 
 test('claudeDefaultStartup_preservesExistingConfigAndDataPaths', async () => {
-  const config = loadConfig();
+  const paths = fixture();
+  fs.writeFileSync(path.join(paths.root, 'office.config.json'), JSON.stringify({ model: 'fixture-model', brain: './brain' }));
+  const config = loadConfig({ office: 'claude', env: {}, root: paths.root });
   assert.equal(config.port, 4520);
-  assert.equal(config.configPath, undefined);
-  assert.equal(config.dataRoot, undefined);
-  assert.equal(config.brainPath, path.resolve(process.cwd(), config.brain));
+  assert.equal(config.configPath, path.join(paths.root, 'office.config.local.json'));
+  assert.equal(config.dataRoot, path.join(paths.root, 'data'));
+  assert.equal(config.brainPath, path.join(paths.root, 'brain'));
 });
 
 test('codexRoster_usesOnlyItsIsolatedBrainCustomization', () => {
@@ -249,6 +273,20 @@ test('launcher_twoOfficesRunIndependentTasksAtOnce', async () => {
   };
   const claude = await startRuntime({ ...claudePaths, office: 'claude', port: 0, runtimeOptions: { taskRunner: runner('claude') }, provider: { id: 'claude' } });
   const codex = await startRuntime({ ...codexPaths, office: 'codex', port: 0, runtimeOptions: { taskRunner: runner('codex') }, provider: { id: 'codex' } });
+  const childHandles = [];
+  const officeUrls = { claude: claude.base, codex: codex.base };
+  const home = fixture();
+  const launcher = createLauncher({
+    config: {
+      root: home.root, host: '127.0.0.1', port: home.port, env: {},
+      claudePort: claude.runtime.server.address().port, codexPort: codex.runtime.server.address().port,
+    },
+    spawnProcess: () => { const child = new EventEmitter(); child.signals = []; child.kill = signal => child.signals.push(signal); childHandles.push(child); return child; },
+    fetchHealth: async (_url, office) => ({ ...await fetch(`${officeUrls[office]}/api/health`).then(response => response.json()), url: officeUrls[office] }),
+  });
+  launchers.push(launcher);
+  await launcher.start();
+  const launcherBase = `http://127.0.0.1:${launcher.server.address().port}`;
   const requests = [
     fetch(`${claude.base}/api/tasks/claude-task/run`, { method: 'POST' }),
     fetch(`${codex.base}/api/tasks/codex-task/run`, { method: 'POST' }),
@@ -258,6 +296,10 @@ test('launcher_twoOfficesRunIndependentTasksAtOnce', async () => {
     await Promise.race([bothStarted, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('both office tasks did not start concurrently')), 1000); })]);
     clearTimeout(timeout);
     assert.deepEqual(calls.sort(), ['claude', 'codex']);
+    const readiness = await fetch(`${launcherBase}/api/health`).then(response => response.json());
+    assert.equal(readiness.offices.claude.status, 'ready');
+    assert.equal(readiness.offices.codex.status, 'ready');
+    assert.deepEqual(childHandles.map(child => child.signals), [[], []], 'launcher-owned child handles stay alive while tasks run');
   } finally { release(); }
   const responses = await Promise.all(requests);
   assert.deepEqual(responses.map(response => response.status), [200, 200]);
@@ -271,10 +313,22 @@ test('claudeSnapshotIsByteIdenticalAfterCodexStartup', async () => {
   fs.writeFileSync(sentinel, Buffer.from('{"model":"sonnet","preserve":"\u00e9"}\n'));
   fs.writeFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), Buffer.from('[{"id":"claude-history"}]\n'));
   fs.writeFileSync(path.join(claudePaths.brainPath, 'claude-note.md'), Buffer.from('Claude-only fixture\n'));
-  const snapshot = () => [sentinel, path.join(claudePaths.dataRoot, 'tasks.json'), path.join(claudePaths.brainPath, 'claude-note.md')].map(file => fs.readFileSync(file));
+  const rosterFile = path.join(claudePaths.brainPath, 'Agents Office', 'agents.json');
+  fs.mkdirSync(path.dirname(rosterFile), { recursive: true });
+  fs.writeFileSync(rosterFile, JSON.stringify({ agents: [{ id: 'elead', name: 'CLAUDE SNAPSHOT FIXTURE' }] }));
+  const snapshotFiles = [sentinel, path.join(claudePaths.dataRoot, 'tasks.json'), path.join(claudePaths.brainPath, 'claude-note.md'), rosterFile];
+  const snapshot = () => snapshotFiles.map(file => fs.readFileSync(file));
   const before = snapshot();
-  await startRuntime({ ...claudePaths, office: 'claude', port: 0, provider: { id: 'claude' } });
-  await startRuntime({ ...codexPaths, office: 'codex', port: 0, provider: { id: 'codex' } });
+  const claude = await startRuntime({ ...claudePaths, office: 'claude', port: 0, provider: { id: 'claude' }, runtimeOptions: {
+    rosterLoader: () => loadRoster(claudePaths.brainPath, { office: 'codex' }),
+  } });
+  const codex = await startRuntime({ ...codexPaths, office: 'codex', port: 0, provider: { id: 'codex' } });
+  assert.equal(claude.officeConfig.model, 'sonnet');
+  assert.equal(codex.officeConfig.model, '');
+  assert.equal(claude.officeConfig.configPath, sentinel);
+  const claudeHealth = await fetch(`${claude.base}/api/health`).then(response => response.json());
+  assert.equal(claudeHealth.roster.customised, 1);
+  assert.equal(claudeHealth.agents.find(agent => agent.id === 'elead').name, 'CLAUDE SNAPSHOT FIXTURE');
   const after = snapshot();
   assert.deepEqual(after, before);
   assert.equal(fs.existsSync(path.join(codexPaths.root, 'office.config.local.json')), false);

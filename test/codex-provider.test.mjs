@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createCodexProvider } from '../codex-provider.mjs';
 import { createOfficeRuntime } from '../serve.mjs';
 import { loadConfig } from '../config.mjs';
-import { loadRoster } from '../roster.mjs';
+import { defaults as defaultRoster, loadRoster } from '../roster.mjs';
 
 function deferredRun({ threadId = 'thread-1', events = [], completed = {} } = {}) {
   const calls = { constructor: [], thread: [], run: [] };
@@ -125,7 +125,7 @@ test('codexRuntime_runsPersistedTasksThroughCodexWithoutClaudeCapabilities', asy
   fs.writeFileSync(path.join(dataRoot, 'tasks.json'), JSON.stringify([{ id: 'persisted-task', dept: 'emails', agent: lead.id, title: 'Prepare report', text: 'Summarize the week', state: 'next', addedAt: Date.now(), plan: [] }]));
   const fake = deferredRun({ events: [{ type: 'thread.started', thread_id: 'real-sdk-thread' }, { type: 'item.completed', item: { type: 'agent_message', text: 'Report ready' } }, { type: 'turn.completed', usage: { input_tokens: 9, output_tokens: 3 } }] });
   const runtime = await createOfficeRuntime({
-    officeConfig: { ...loadConfig(), office: 'codex', provider: 'codex', port: 0, dataRoot, brainPath },
+    officeConfig: { ...loadConfig({ office: 'codex', env: {}, root }), office: 'codex', provider: 'codex', port: 0, dataRoot, brainPath },
     provider: { id: 'codex', sdk: fake.sdk, policy: { sandboxMode: 'workspace-write', approvalPolicy: 'on-request' } },
   });
   try {
@@ -162,7 +162,7 @@ test('codexRuntime_doesNotMarkFailedCodexApprovalAsApproved', async () => {
   fs.writeFileSync(path.join(dataRoot, 'tasks.json'), JSON.stringify([{ id: 'approval-task', dept: 'emails', agent: lead.id, title: 'Send report', text: 'Send the report', state: 'waiting', needsOk: true, draft: 'Draft report', addedAt: Date.now(), plan: [] }]));
   const calls = [];
   const runtime = await createOfficeRuntime({
-    officeConfig: { ...loadConfig(), office: 'codex', provider: 'codex', port: 0, dataRoot, brainPath },
+    officeConfig: { ...loadConfig({ office: 'codex', env: {}, root }), office: 'codex', provider: 'codex', port: 0, dataRoot, brainPath },
     provider: { id: 'codex', async runTask(input) { calls.push(input); return { status: 'blocked', error: 'Approval cannot be resumed safely', text: '', provider: 'codex' }; } },
   });
   try {
@@ -200,7 +200,7 @@ test('codexRuntime_doesNotApproveOrWriteNoteWhenCodexFailsWithoutError', async (
   fs.writeFileSync(path.join(dataRoot, 'tasks.json'), JSON.stringify([{ id: 'failed-approval-task', dept: 'emails', agent: lead.id, title: 'Send report', text: 'Send the report', state: 'waiting', needsOk: true, draft: 'Draft report', addedAt: Date.now(), plan: [] }]));
   const calls = [];
   const runtime = await createOfficeRuntime({
-    officeConfig: { ...loadConfig(), office: 'codex', provider: 'codex', port: 0, dataRoot, brainPath },
+    officeConfig: { ...loadConfig({ office: 'codex', env: {}, root }), office: 'codex', provider: 'codex', port: 0, dataRoot, brainPath },
     provider: { id: 'codex', async runTask(input) { calls.push(input); return { status: 'failed', error: null, text: 'provider output', provider: 'codex' }; } },
   });
   try {
@@ -245,8 +245,9 @@ test('codexProviderFailureLeavesClaudeAvailable', async () => {
   let claudeRuns = 0, codexRuns = 0;
   const makeRuntime = async (office, paths, provider, runtimeOptions = {}) => {
     const runtime = await createOfficeRuntime({
-      officeConfig: { ...loadConfig(), office, provider: office, port: 0, ...paths },
+      officeConfig: { ...loadConfig({ office, env: {}, root }), office, provider: office, port: 0, ...paths },
       provider,
+      ...(office === 'claude' ? { rosterLoader: () => ({ agents: defaultRoster(), problems: [], customised: 0, briefed: 0, files: [] }) } : {}),
       ...runtimeOptions,
     });
     await runtime.start();

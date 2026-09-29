@@ -56,7 +56,7 @@ import { parseWhen, describe, valid as validWhen, untilText } from './src/when.j
 import { createTranslator, isSupportedLang } from './translate.mjs'; // V3.7: live UI translation (EN/ES)
 import { createCodexProvider } from './codex-provider.mjs';
 
-export async function createOfficeRuntime({ officeConfig, provider, dataRoot, brainPath, usageFetch, discoverMcp, taskRunner } = {}) {
+export async function createOfficeRuntime({ officeConfig, provider, dataRoot, brainPath, usageFetch, discoverMcp, taskRunner, rosterLoader = loadRoster } = {}) {
 const cfg = officeConfig || loadConfig();
 const OFFICE = cfg.office || 'claude';
 const PROVIDER = (typeof provider === 'string' ? provider : provider?.id) || cfg.provider || OFFICE;
@@ -83,7 +83,7 @@ mcp.configure(cfg);
 const emptyMcpSummary = () => ({ discoveredAt: 0, web: false, browser: { on: false, installed: false, device: '', onboarded: false }, servers: [] });
 const mcpSummary = () => PROVIDER === 'claude' ? mcp.summary() : emptyMcpSummary();
 const TEAMS = PROVIDER === 'claude' ? teams.settings(cfg) : { enabled: false, max: 0 }; // Teams are Claude-specific until Codex reports its own support.
-const roster = loadRoster(BRAIN, { office: OFFICE });
+const roster = rosterLoader(BRAIN, { office: OFFICE });
 const AGENTS = roster.agents; // id · department · lead · name · role · does · tools · brief
 for (const w of roster.problems) console.warn('agents:', w);
 let skills = loadSkills(BRAIN, AGENTS); // reloaded before every task and chat, so a new skill needs no restart
