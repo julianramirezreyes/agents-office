@@ -86,6 +86,48 @@ export function createCodexProvider({ sdk, codexHome, workspaceRoot = process.cw
       }
     },
 
+    async runChat({ prompt, cwd = root, model, approvalPolicy: requestedApproval = approvalPolicy } = {}) {
+      let canonicalRoot;
+      let workingDirectory;
+      try {
+        canonicalRoot = fs.realpathSync(root);
+        workingDirectory = fs.realpathSync(path.resolve(cwd));
+      } catch {
+        return { status: 'blocked', error: 'Requested working directory is unavailable under the Codex workspace policy', provider: 'codex' };
+      }
+      if (!inside(canonicalRoot, workingDirectory)) {
+        return { status: 'blocked', error: 'Requested working directory is outside the Codex workspace policy', provider: 'codex' };
+      }
+      if (!VALID_SANDBOX.has(sandboxMode) || !VALID_APPROVAL.has(approvalPolicy)) {
+        return { status: 'blocked', error: 'Configured Codex policy is unsupported; no chat was started', provider: 'codex' };
+      }
+      if (requestedApproval !== approvalPolicy) {
+        return { status: 'blocked', error: 'Requested approval policy is not supported by the configured Codex policy', provider: 'codex' };
+      }
+      if (model && CODEX_ALIAS.test(model)) {
+        return { status: 'blocked', error: 'Claude model aliases are not valid Codex model identifiers', provider: 'codex' };
+      }
+
+      let thread;
+      let threadId;
+      try {
+        const client = await getCodex();
+        const options = { workingDirectory, sandboxMode, approvalPolicy };
+        if (model) options.model = model;
+        thread = client.startThread(options);
+        const result = await thread.run(String(prompt || ''));
+        threadId = typeof thread?.id === 'string' ? thread.id : (typeof result?.threadId === 'string' ? result.threadId : undefined);
+        const text = typeof result?.finalResponse === 'string' ? result.finalResponse : '';
+        if (!text.trim()) {
+          return { status: 'failed', threadId, text: '', usage: result?.usage, error: 'Codex completed without a final assistant message', provider: 'codex' };
+        }
+        return { status: 'completed', threadId, text, usage: result?.usage, error: null, provider: 'codex' };
+      } catch (error) {
+        threadId ||= typeof thread?.id === 'string' ? thread.id : undefined;
+        return { status: 'failed', threadId, text: '', usage: undefined, error: messageOf(error), provider: 'codex' };
+      }
+    },
+
     async close() {},
   };
 }

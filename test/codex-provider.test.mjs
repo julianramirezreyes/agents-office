@@ -97,6 +97,86 @@ test('codexProvider_neverFallsBackToClaude', async () => {
   assert.equal(result.provider, 'codex');
 });
 
+test('codexProvider_runsChatOnFreshPolicyBoundThreadsAndReturnsFinalResponse', async () => {
+  const calls = { threads: [], runs: [] };
+  class FakeCodex {
+    startThread(options) {
+      const id = `chat-${calls.threads.length + 1}`;
+      calls.threads.push({ id, options });
+      return {
+        id,
+        async run(prompt) {
+          calls.runs.push(prompt);
+          return { finalResponse: `Reply ${id}`, usage: { input_tokens: 8, output_tokens: 4 } };
+        },
+      };
+    }
+  }
+  const provider = createCodexProvider({
+    sdk: { Codex: FakeCodex },
+    workspaceRoot: process.cwd(),
+    policy: { sandboxMode: 'read-only', approvalPolicy: 'never' },
+  });
+
+  const first = await provider.runChat({ prompt: 'Agent context\nRecent owner history\nOwner: hello', cwd: process.cwd() });
+  const second = await provider.runChat({ prompt: 'Agent context\nRecent owner history\nOwner: again', cwd: process.cwd() });
+
+  assert.deepEqual(calls.threads, [
+    { id: 'chat-1', options: { workingDirectory: process.cwd(), sandboxMode: 'read-only', approvalPolicy: 'never' } },
+    { id: 'chat-2', options: { workingDirectory: process.cwd(), sandboxMode: 'read-only', approvalPolicy: 'never' } },
+  ]);
+  assert.deepEqual(calls.runs, [
+    'Agent context\nRecent owner history\nOwner: hello',
+    'Agent context\nRecent owner history\nOwner: again',
+  ]);
+  assert.deepEqual(first, { status: 'completed', threadId: 'chat-1', text: 'Reply chat-1', usage: { input_tokens: 8, output_tokens: 4 }, error: null, provider: 'codex' });
+  assert.equal(second.threadId, 'chat-2');
+});
+
+test('codexProvider_blocksUnsupportedChatPolicyBeforeStartingSdk', async () => {
+  let starts = 0;
+  const provider = createCodexProvider({
+    sdk: { Codex: class { startThread() { starts++; return { async run() { return { finalResponse: 'unexpected' }; } }; } } },
+    workspaceRoot: process.cwd(),
+    policy: { sandboxMode: 'unrestricted-ish', approvalPolicy: 'on-request' },
+  });
+
+  const result = await provider.runChat({ prompt: 'Do not run' });
+
+  assert.equal(result.status, 'blocked');
+  assert.match(result.error, /configured Codex policy/i);
+  assert.equal(result.provider, 'codex');
+  assert.equal(starts, 0);
+});
+
+test('codexProvider_reportsMissingChatFinalResponseExplicitly', async () => {
+  const provider = createCodexProvider({
+    sdk: { Codex: class { startThread() { return { async run() { return { finalResponse: '' }; } }; } } },
+    workspaceRoot: process.cwd(),
+  });
+
+  const result = await provider.runChat({ prompt: 'Hello' });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.text, '');
+  assert.match(result.error, /without a final assistant message/i);
+  assert.equal(result.provider, 'codex');
+});
+
+test('codexProvider_reportsChatSdkFailuresExplicitly', async () => {
+  const provider = createCodexProvider({
+    sdk: { Codex: class { startThread() { return { id: 'chat-failure', async run() { throw new Error('Codex chat failed'); } }; } } },
+    workspaceRoot: process.cwd(),
+  });
+
+  const result = await provider.runChat({ prompt: 'Hello' });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.threadId, 'chat-failure');
+  assert.equal(result.error, 'Codex chat failed');
+  assert.equal(result.provider, 'codex');
+});
+
 test('codexProvider_rejectsCwdSymlinkEscapingWorkspaceBeforeStartingSdk', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-workspace-'));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-outside-'));
