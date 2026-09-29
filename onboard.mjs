@@ -91,10 +91,22 @@ export async function writeUp(answers, ctx) {
   // the skill → <brain>/Agents Office/skills/<name>/SKILL.md (+ template.md)
   let skill = null;
   if (j.skill && typeof j.skill === 'object' && String(j.skill.body || '').trim()) {
-    const name = String(j.skill.name || `${dept}-job`).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '') || `${dept}-job`;
+    let name = String(j.skill.name || `${dept}-job`).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '') || `${dept}-job`;
+    if (name === '.' || name === '..') name = `${dept}-job`;
     let bound = (Array.isArray(j.skill.agents) ? j.skill.agents : []).filter(id => ids.has(id));
     if (!bound.length) bound = [lead.id];
-    const dir = path.join(brainPath, 'Agents Office', 'skills', name);
+    const skillsRoot = path.resolve(brainPath, 'Agents Office', 'skills');
+    let dir = path.resolve(skillsRoot, name);
+    let relative = path.relative(skillsRoot, dir);
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      name = `${dept}-job`;
+      dir = path.resolve(skillsRoot, name);
+      relative = path.relative(skillsRoot, dir);
+    }
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      problems.push('the generated skill name did not resolve below the skills directory');
+      return { briefs, skill: null, agentsFile: path.relative(process.cwd(), agentsFile), problems, tryTask: String(j.try || '').trim().slice(0, 90) };
+    }
     if (fs.existsSync(path.join(dir, 'SKILL.md'))) { const bak = path.join(dir, `SKILL.md.backup-${Date.now()}`); fs.copyFileSync(path.join(dir, 'SKILL.md'), bak); problems.push(`a skill called ${name} already existed — the old SKILL.md is kept beside it as ${path.basename(bak)}`); }
     fs.mkdirSync(dir, { recursive: true });
     const description = String(j.skill.description || '').replace(/\n/g, ' ').trim().slice(0, 160);

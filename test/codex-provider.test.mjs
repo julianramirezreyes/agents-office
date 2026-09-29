@@ -156,18 +156,36 @@ test('codexProvider_alwaysUsesReadOnlyNeverApprovalForChatAndRejectsBroaderReque
   assert.equal(calls.thread.length, 1, 'the broader policy must not reach the SDK');
 });
 
-test('codexProvider_blocksUnsupportedChatPolicyBeforeStartingSdk', async () => {
+test('codexProvider_chatRemainsAvailableWhenConfiguredTaskPolicyIsInvalid', async () => {
+  const calls = { thread: [] };
+  class FakeCodex {
+    startThread(options) {
+      calls.thread.push(options);
+      return { async run() { return { finalResponse: 'Safe chat answer' }; } };
+    }
+  }
+  const provider = createCodexProvider({ sdk: { Codex: FakeCodex }, workspaceRoot: process.cwd(), policy: { sandboxMode: 'invalid', approvalPolicy: 'ask-every-time' } });
+
+  const chat = await provider.runChat({ prompt: 'Answer safely' });
+  const task = await provider.runTask({ taskId: 'still-blocked', prompt: 'Do work' });
+
+  assert.equal(chat.status, 'completed');
+  assert.deepEqual(calls.thread, [{ workingDirectory: process.cwd(), sandboxMode: 'read-only', approvalPolicy: 'never' }]);
+  assert.equal(task.status, 'blocked');
+  assert.match(task.error, /configured Codex policy/i);
+});
+
+test('codexProvider_blocksExplicitlyBroaderChatPolicyBeforeStartingSdk', async () => {
   let starts = 0;
   const provider = createCodexProvider({
     sdk: { Codex: class { startThread() { starts++; return { async run() { return { finalResponse: 'unexpected' }; } }; } } },
     workspaceRoot: process.cwd(),
-    policy: { sandboxMode: 'unrestricted-ish', approvalPolicy: 'on-request' },
   });
 
-  const result = await provider.runChat({ prompt: 'Do not run' });
+  const result = await provider.runChat({ prompt: 'Do not run', sandboxMode: 'workspace-write', approvalPolicy: 'on-request' });
 
   assert.equal(result.status, 'blocked');
-  assert.match(result.error, /configured Codex policy/i);
+  assert.match(result.error, /read-only.*never-approval/i);
   assert.equal(result.provider, 'codex');
   assert.equal(starts, 0);
 });

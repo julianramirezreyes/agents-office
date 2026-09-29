@@ -98,9 +98,6 @@ export function createCodexProvider({ sdk, codexHome, workspaceRoot = process.cw
       if (!inside(canonicalRoot, workingDirectory)) {
         return { status: 'blocked', error: 'Requested working directory is outside the Codex workspace policy', provider: 'codex' };
       }
-      if (!VALID_SANDBOX.has(sandboxMode) || !VALID_APPROVAL.has(approvalPolicy)) {
-        return { status: 'blocked', error: 'Configured Codex policy is unsupported; no chat was started', provider: 'codex' };
-      }
       if (requestedSandbox !== 'read-only' || requestedApproval !== 'never') {
         return { status: 'blocked', error: 'Codex chat requires read-only access and never-approval policy', provider: 'codex' };
       }
