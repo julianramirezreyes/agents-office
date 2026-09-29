@@ -79,6 +79,7 @@ Ruta ODD: **delegated direct** para la migración operativa, por requerir varias
 ## Progreso y evidencia
 
 - **Estado:** plan registrado; ninguna fusión, fetch, configuración remota, fork ni publicación realizada como parte de este documento.
+- **Documento local:** `odd/tasks/fork-migration.md`.
 - **Comprobaciones de preparación:** estado leído en el worktree `/home/julian/proyectos/agents-office-worktrees/dual-offices`; está en `feat/dual-offices` (`d7ad60b`) y su único elemento no rastreado observado fue `.codegraph/`.
 - **TDD/verificación del producto:** pendiente para la ejecución de integración; modo estricto del proyecto indicado como habilitado, runner `node --test test/*.test.mjs`.
 - **Commit de introducción del documento:** `3bd37ada89eed0b5aad3604ddc3d00e6df4b5ba3` (`docs: plan personal fork migration`).
