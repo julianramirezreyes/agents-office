@@ -9,7 +9,7 @@ Dejar un único worktree Git en `/home/julian/proyectos/agents-office`, sobre `m
 - Conservar sin sobrescribir la configuración y los datos ignorados del checkout principal, `AGENTS.md`, `.atl/`, `.codegraph/` y cualquier otro contenido local.
 - Trasladar desde `dual-offices` únicamente la configuración local de Codex, su archivo de tareas, su archivo de agentes y nueve artefactos SDD ignorados. Verificar cada copia por hash antes de retirar el original.
 - Eliminar en los worktrees secundarios solo las copias ya verificadas y las cachés regenerables autorizadas. Usar `git worktree remove` sin `--force`; detenerse ante archivos nuevos o una negativa de Git.
-- Cambiar el checkout principal a `main` sin limpiar ni descartar sus archivos locales; integrar la rama operativa localmente. No ejecutar proveedores, operaciones remotas, `git clean`, `reset`, `stash`, push ni PR. No detener el proceso `node serve.mjs` existente.
+- Cambiar el checkout principal a `main` sin limpiar ni descartar sus archivos locales; integrar la rama operativa localmente. No ejecutar proveedores, operaciones remotas, `git clean`, `reset`, `stash`, push ni PR. La unidad delegada no debe detener el proceso `node serve.mjs` existente; su gestión queda a cargo del orquestador.
 - No modificar código de producto ni scripts de `package.json`.
 
 ## Plan y evidencia
@@ -27,7 +27,7 @@ Dejar un único worktree Git en `/home/julian/proyectos/agents-office`, sobre `m
 - Estrategia de entrega: `ask-on-risk`; pronóstico de cambios escritos menor a 400 líneas. Sin entrega remota solicitada.
 - Estado del espejo Engram: actualizado bajo `odd/workspace-consolidation/tasks` al cerrar la tarea.
 
-## Resultados observados en la rama operativa
+## Resultados de la unidad delegada
 
 - Los tres worktrees se inspeccionaron antes del traslado. `feat/dual-offices` y `feat/live-translation` son ancestros de `main`; por ello no se repitió ninguna integración de producto.
 - Se copiaron con creación exclusiva y se compararon por SHA-256 los 12 archivos únicos: configuración, tareas y agentes de Codex, y nueve artefactos SDD ignorados. No hubo colisiones ni sobrescrituras. Solo después se retiraron esos originales y las cachés secundarias `.codegraph/`, `node_modules/`, `dist/app.js` y `dist/dev.html`.
@@ -37,6 +37,12 @@ Dejar un único worktree Git en `/home/julian/proyectos/agents-office`, sobre `m
 - `launcher.mjs` sigue exportando `createLauncher` como función. El script `start` sigue siendo `node serve.mjs`; esta operación no cambió el comando de inicio ni ejecutó el launcher.
 - El registro se confirmó en `cf63f04361d7a76f32bdfd127b99e1e67df2e046` y se integró explícitamente en `main` mediante `e47debb77de7de9146cc49798feadeedbd8ebc0f`. En `main`, la segunda ejecución aislada de `npm run check` terminó con código 0: compilación, navegador y HTTP aprobados; 139 pruebas aprobadas, 0 fallidas; llamadas a proveedor, uso y MCP: 0/0/0.
 - La verificación estructural final confirmó un solo worktree, `main`, los 12 SHA-256 conservados, las tres ramas como ancestros, los cinco grupos de rutas locales protegidas y únicamente los dos archivos no rastreados preexistentes. `git diff --check` terminó con código 0. No se hizo push ni PR.
+
+## Cierre operativo posterior
+
+- El orquestador identificó el proceso heredado PID `2710662` como `node serve.mjs` con directorio de trabajo en el checkout principal y le envió `SIGTERM`. Esta acción fue posterior a la unidad delegada; la comprobación posterior no mostró ese PID ni escuchas en los puertos `4519`, `4520` y `4521`.
+- El orquestador eliminó con `rmdir` el contenedor vacío `agents-office-worktrees`; se verificó que la ruta ya no existe.
+- Un spot-check adicional de `npm run check`, con `HOME`, configuraciones y `PATH` de CLI aislados, terminó con código 0: compilación, navegador y HTTP aprobados; 139/139 pruebas aprobadas; llamadas a proveedor, uso y MCP: 0/0/0. No se ejecutó `check:live` ni una prueba con proveedor real.
 
 ## Siguiente paso
 
