@@ -313,14 +313,13 @@ test('claudeSnapshotIsByteIdenticalAfterCodexStartup', async () => {
   fs.writeFileSync(sentinel, Buffer.from('{"model":"sonnet","preserve":"\u00e9"}\n'));
   fs.writeFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), Buffer.from('[{"id":"claude-history"}]\n'));
   fs.writeFileSync(path.join(claudePaths.brainPath, 'claude-note.md'), Buffer.from('Claude-only fixture\n'));
-  const rosterFile = path.join(claudePaths.brainPath, 'Agents Office', 'agents.json');
-  fs.mkdirSync(path.dirname(rosterFile), { recursive: true });
+  const rosterFile = path.join(claudePaths.root, 'office.agents.json');
   fs.writeFileSync(rosterFile, JSON.stringify({ agents: [{ id: 'elead', name: 'CLAUDE SNAPSHOT FIXTURE' }] }));
   const snapshotFiles = [sentinel, path.join(claudePaths.dataRoot, 'tasks.json'), path.join(claudePaths.brainPath, 'claude-note.md'), rosterFile];
   const snapshot = () => snapshotFiles.map(file => fs.readFileSync(file));
   const before = snapshot();
   const claude = await startRuntime({ ...claudePaths, office: 'claude', port: 0, provider: { id: 'claude' }, runtimeOptions: {
-    rosterLoader: () => loadRoster(claudePaths.brainPath, { office: 'codex' }),
+    rosterLoader: (brainPath, options) => loadRoster(brainPath, { ...options, root: claudePaths.root }),
   } });
   const codex = await startRuntime({ ...codexPaths, office: 'codex', port: 0, provider: { id: 'codex' } });
   assert.equal(claude.officeConfig.model, 'sonnet');
@@ -329,6 +328,7 @@ test('claudeSnapshotIsByteIdenticalAfterCodexStartup', async () => {
   const claudeHealth = await fetch(`${claude.base}/api/health`).then(response => response.json());
   assert.equal(claudeHealth.roster.customised, 1);
   assert.equal(claudeHealth.agents.find(agent => agent.id === 'elead').name, 'CLAUDE SNAPSHOT FIXTURE');
+  assert.ok(claudeHealth.roster.files.includes('office.agents.json'), 'Claude mode reads its explicit fixture root, not Codex roster semantics');
   const after = snapshot();
   assert.deepEqual(after, before);
   assert.equal(fs.existsSync(path.join(codexPaths.root, 'office.config.local.json')), false);

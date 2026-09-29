@@ -80,8 +80,19 @@ test('office_switchAcceptsTheConfiguredIPv6LoopbackRuntime', async () => {
 
 test('navigationDoesNotCallTaskCancellation', async () => {
   const requested = [];
+  const activeTask = { id: 'fixture-active-task', state: 'doing' };
+  let cancellationCalls = 0;
   const link = fakeLink();
-  const target = http.createServer((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ office: 'claude', visited: true })); });
+  const target = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.method === 'DELETE' && req.url === `/api/tasks/${activeTask.id}`) {
+      cancellationCalls++;
+      activeTask.state = 'cancelled';
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    res.end(JSON.stringify({ office: 'claude', visited: true, activeTask: { ...activeTask } }));
+  });
   await new Promise(resolve => target.listen(0, '127.0.0.1', resolve));
   const targetUrl = `http://127.0.0.1:${target.address().port}/`;
   try {
@@ -91,7 +102,11 @@ test('navigationDoesNotCallTaskCancellation', async () => {
     });
     assert.deepEqual(requested, ['http://127.0.0.1:4519/api/health']);
     assert.equal(link.href, targetUrl);
-    assert.deepEqual(await fetch(link.href).then(response => response.json()), { office: 'claude', visited: true });
+    assert.deepEqual(await fetch(link.href).then(response => response.json()), {
+      office: 'claude', visited: true, activeTask: { id: 'fixture-active-task', state: 'doing' },
+    });
+    assert.equal(cancellationCalls, 0, 'following the navigation link never invokes the fixture cancellation endpoint');
+    assert.equal(activeTask.state, 'doing', 'the active task survives destination navigation');
   } finally {
     await new Promise(resolve => target.close(resolve));
   }

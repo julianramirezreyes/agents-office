@@ -2,6 +2,7 @@
 // brain, or data; never spawn a real office process or invoke a provider/auth command.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -25,6 +26,12 @@ function isolatedEnv(home) {
 
 function makeTempRoot(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+function localChromiumExecutable() {
+  const configured = process.env.CHECK_BROWSER_EXECUTABLE;
+  if (configured && path.isAbsolute(configured) && fs.existsSync(configured)) return configured;
+  return ['/usr/bin/google-chrome', '/usr/bin/brave-browser'].find(file => fs.existsSync(file)) || '';
 }
 
 async function buildSmoke(dependencyRoot, scratch) {
@@ -57,7 +64,7 @@ async function buildSmoke(dependencyRoot, scratch) {
   return { project, html: path.join(project, 'dist/command-centre-v2.html'), output: build.stdout.trim() };
 }
 
-async function browserSmoke(html, dependencyRoot, scratch) {
+async function browserSmoke(project, html, dependencyRoot, scratch, executablePath = '') {
   let chromium;
   try {
     ({ chromium } = await import(pathToFileURL(path.join(dependencyRoot, 'node_modules/playwright-core/index.mjs')).href));
@@ -65,29 +72,137 @@ async function browserSmoke(html, dependencyRoot, scratch) {
     if (error.code === 'ERR_MODULE_NOT_FOUND') return { status: 'skipped', reason: 'playwright-core is unavailable; no installation attempted' };
     throw error;
   }
-  let browser;
+  let context;
+  const browserProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'aob-'));
+  const browserHome = fs.mkdtempSync(path.join(os.tmpdir(), 'aoh-'));
   try {
-    browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], env: isolatedEnv(path.join(scratch, 'browser-home')) });
+    context = await chromium.launchPersistentContext(path.join(browserProfile, 'p'), {
+      ...(executablePath ? { executablePath } : {}),
+      headless: true,
+      viewport: { width: 1512, height: 900 },
+      args: [
+        '--no-sandbox', '--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--disable-background-networking', '--disable-background-timer-throttling',
+        '--disable-component-update', '--disable-default-apps', '--disable-extensions', '--disable-sync',
+        '--disable-translate', '--metrics-recording-only', '--no-first-run',
+        '--disable-features=MediaRouter,OptimizationHints,AutofillServerCommunication,Translate',
+      ],
+      env: isolatedEnv(browserHome),
+    });
   } catch (error) {
     if (/executable|browser.*not found|ENOENT/i.test(error.message)) return { status: 'skipped', reason: 'no local Playwright browser executable; no download attempted' };
     throw error;
   }
+  const staticRoot = path.resolve(project);
+  const server = http.createServer((req, res) => {
+    const requested = decodeURIComponent(new URL(req.url, 'http://127.0.0.1').pathname);
+    if (requested.startsWith('/api/')) {
+      const fixtures = {
+        '/api/health': { ok: false, office: 'fixture', provider: 'none' },
+        '/api/tasks': [], '/api/routines': { routines: [] }, '/api/usage': { ok: false, source: 'fixture' },
+        '/api/brain': { notes: 0, nodes: [], links: [], floor: [] }, '/api/mcp': { servers: [], provider: 'none' },
+        '/api/skills': { count: 0 }, '/api/lessons': { agents: [] }, '/api/agents': { agents: [] },
+      };
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(fixtures[requested] ?? {}));
+    }
+    const file = path.resolve(staticRoot, `.${requested}`);
+    if (!file.startsWith(`${staticRoot}${path.sep}`) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+      res.writeHead(404); return res.end();
+    }
+    const contentType = file.endsWith('.html') ? 'text/html; charset=utf-8'
+      : file.endsWith('.js') ? 'text/javascript; charset=utf-8'
+      : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream';
+    res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store' });
+    fs.createReadStream(file).pipe(res);
+  });
+  let blockedExternalRequests = 0;
   try {
-    const page = await browser.newPage();
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    await context.route('**/*', route => {
+      const url = new URL(route.request().url());
+      const loopback = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(url.hostname);
+      if (url.protocol === 'file:' || (url.protocol === 'http:' && loopback)) return route.continue();
+      blockedExternalRequests++;
+      return route.abort('blockedbyclient');
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(2500);
+    page.setDefaultNavigationTimeout(5000);
     const errors = [];
+    const assertions = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(pathToFileURL(html).href, { waitUntil: 'load' });
+    page.on('console', message => { if (message.type() === 'error' && !/ERR_BLOCKED_BY_CLIENT/.test(message.text())) errors.push(`${message.text().slice(0, 160)} (${message.location().url})`); });
+    const localUrl = `http://127.0.0.1:${server.address().port}/${path.relative(staticRoot, html).split(path.sep).join('/')}?s=check`;
+    await page.goto(localUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForTimeout(3000);
     assert.match(await page.title(), /Agents Office/);
     assert.equal(await page.locator('#scene').count(), 1);
+    const clickUI = selector => page.locator(selector).evaluate(element => element.click());
+    const fillUI = (selector, value) => page.locator(selector).evaluate((element, text) => {
+      element.value = text;
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.focus();
+    }, value);
+    assert.equal(await page.evaluate(() => Object.keys(window.CC.R).length), 35, 'synthetic UI retains the fixed roster');
+    assertions.push('roster');
+    await clickUI('.tp-dd');
+    await clickUI('.tp-menu button[data-k="marketing"]');
+    await fillUI('.tp-in', 'cut a synthetic teaser from the demo reel');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => /Added/.test(document.querySelector('.tp-hint').textContent), null, { timeout: 3000 });
+    assert.ok(await page.evaluate(() => window.CC.tasks.tasks.some(task => /synthetic teaser/i.test(task.title))));
+    assertions.push('command-bar');
+    await clickUI('.tp-dd');
+    await clickUI('.tp-menu button[data-k="sales"]');
+    await fillUI('.tp-in', 'as a team, plan a synthetic outreach push');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => /Added/.test(document.querySelector('.tp-hint').textContent), null, { timeout: 3000 });
+    assert.ok(await page.evaluate(() => window.CC.tasks.tasks.some(task => /synthetic outreach push/i.test(task.title))));
+    assertions.push('team');
+    await clickUI('.tp-dd');
+    await clickUI('.tp-menu button[data-k="emails"]');
+    await fillUI('.tp-in', 'every weekday at 8am, triage the synthetic inbox');
+    await page.waitForFunction(() => /Routine/.test(document.querySelector('.tp-hint').textContent), null, { timeout: 3000 }).catch(() => {});
+    assert.match(await page.locator('.tp-hint:not(.tb-hint)').textContent(), /Routine/);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => /Routine set/.test(document.querySelector('.tp-hint').textContent), null, { timeout: 3000 }).catch(() => {});
+    assert.match(await page.locator('.tp-hint:not(.tb-hint)').textContent(), /Routine set/);
+    assert.equal(await page.evaluate(() => window.CC.routines().length), 1);
+    assertions.push('routine');
+    await clickUI('#topCal');
+    assert.equal(await page.locator('#calOv.on').count(), 1);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('p');
+    assert.equal(await page.locator('#calOv.on').count(), 1);
+    assertions.push('calendar');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('b');
+    await page.waitForFunction(() => window.CC.tasks.isOpen(), null, { timeout: 3000 });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('g');
+    await page.waitForFunction(() => window.CC.brain.isOpen(), null, { timeout: 3000 });
+    assert.ok(await page.evaluate(() => window.CC.brain.nodes.length > 0));
+    await page.keyboard.press('Escape');
+    assertions.push('keyboard');
+    await page.evaluate(() => { window.CC.R.ada.state = 'working'; window.CC.requestApproval('ada'); });
+    const approvalState = await page.evaluate(() => ({ waiting: window.CC.tasks.tasks.filter(task => task.state === 'waiting').length, ada: window.CC.R.ada.state }));
+    assert.equal(approvalState.waiting, 1, 'approval request is represented as a waiting task');
+    assert.notEqual(await page.locator('#topAppr').evaluate(element => getComputedStyle(element).display), 'none', 'approval indicator is shown in the panel chrome');
+    assertions.push('approval');
+    await page.evaluate(async () => { try { await fetch('https://example.invalid/blocked'); } catch {} });
+    assert.ok(blockedExternalRequests > 0, 'browser routing blocks an external URL before network access');
     assert.deepEqual(errors, [], 'offline UI should load without uncaught browser errors');
-    return { status: 'passed' };
+    return { status: 'passed', blockedExternalRequests, assertions };
   } finally {
-    await browser.close();
+    try { if (context) await context.close(); } finally {
+      await new Promise(resolve => server.close(resolve));
+      fs.rmSync(browserProfile, { recursive: true, force: true });
+      fs.rmSync(browserHome, { recursive: true, force: true });
+    }
   }
 }
 
-async function httpSmoke(scratch, calls) {
-  const project = path.join(scratch, 'http-project');
+async function httpSmoke(project, scratch, calls) {
   const home = path.join(scratch, 'http-home');
   fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
   const envKeys = ['HOME', 'USERPROFILE', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'TMPDIR', 'TEMP', 'TMP'];
@@ -100,9 +215,18 @@ async function httpSmoke(scratch, calls) {
   try {
     fs.mkdirSync(path.join(project, 'brain-codex', 'Agents Office'), { recursive: true });
     fs.mkdirSync(path.join(project, 'data-codex'), { recursive: true });
-    fs.writeFileSync(path.join(project, 'office.config.codex.local.json'), JSON.stringify({ brain: './brain-codex' }));
-    fs.writeFileSync(path.join(project, 'brain-codex', 'Agents Office', 'agents.json'), JSON.stringify({ agents: [{ id: 'elead', name: 'SMOKE FIXTURE AGENT' }] }));
-    fs.writeFileSync(path.join(project, 'data-codex', 'tasks.json'), JSON.stringify([{ id: 'fixture-task', title: 'Synthetic task' }]));
+    if (!fs.existsSync(path.join(project, 'brain-codex', 'smoke.md'))) {
+      fs.writeFileSync(path.join(project, 'brain-codex', 'smoke.md'), 'Synthetic brain note.\n');
+    }
+    if (!fs.existsSync(path.join(project, 'office.config.codex.local.json'))) {
+      fs.writeFileSync(path.join(project, 'office.config.codex.local.json'), JSON.stringify({ name: 'Synthetic Codex Office', brain: './brain-codex' }));
+    }
+    if (!fs.existsSync(path.join(project, 'brain-codex', 'Agents Office', 'agents.json'))) {
+      fs.writeFileSync(path.join(project, 'brain-codex', 'Agents Office', 'agents.json'), JSON.stringify({ agents: [{ id: 'elead', name: 'SMOKE FIXTURE AGENT' }] }));
+    }
+    if (!fs.existsSync(path.join(project, 'data-codex', 'tasks.json'))) {
+      fs.writeFileSync(path.join(project, 'data-codex', 'tasks.json'), JSON.stringify([{ id: 'fixture-task', title: 'Synthetic task' }]));
+    }
     const officeConfig = {
       ...loadConfig({ office: 'codex', root: project, env: { AO_CODEX_PORT: '0' } }),
       office: 'codex', provider: 'codex',
@@ -119,20 +243,36 @@ async function httpSmoke(scratch, calls) {
     });
     await runtime.start();
     const base = `http://127.0.0.1:${runtime.server.address().port}`;
-    const [health, tasks, usage, mcp, roster] = await Promise.all([
+    const [health, tasks, usage, mcp, roster, brain, skills, lessons, routines] = await Promise.all([
       fetch(`${base}/api/health`).then(response => response.json()),
       fetch(`${base}/api/tasks`).then(response => response.json()),
       fetch(`${base}/api/usage`).then(response => response.json()),
       fetch(`${base}/api/mcp`).then(response => response.json()),
       fetch(`${base}/api/agents`).then(response => response.json()),
+      fetch(`${base}/api/brain`).then(response => response.json()),
+      fetch(`${base}/api/skills`).then(response => response.json()),
+      fetch(`${base}/api/lessons`).then(response => response.json()),
+      fetch(`${base}/api/routines`).then(response => response.json()),
     ]);
+    const fixtureRoster = JSON.parse(fs.readFileSync(path.join(project, 'brain-codex', 'Agents Office', 'agents.json'), 'utf8'));
+    const expectedAgentName = fixtureRoster.agents.find(agent => agent.id === 'elead').name;
     assert.equal(health.office, 'codex');
     assert.equal(health.provider, 'codex');
     assert.equal(health.roster.customised, 1);
     assert.deepEqual(tasks.map(task => task.id), ['fixture-task']);
-    assert.equal(roster.agents.find(agent => agent.id === 'elead').name, 'SMOKE FIXTURE AGENT');
+    assert.equal(roster.agents.find(agent => agent.id === 'elead').name, expectedAgentName);
+    assert.equal(brain.notes, 1, 'brain endpoint reads the supplied fixture root');
+    assert.ok(Number.isInteger(skills.count));
+    assert.deepEqual(lessons.agents, []);
+    assert.deepEqual(routines.routines, []);
     assert.equal(usage.source, 'codex');
     assert.equal(mcp.provider, 'codex');
+    const missing = await fetch(`${base}/api/not-a-route`);
+    assert.equal(missing.status, 404);
+    const crossOfficeQuery = await fetch(`${base}/api/health?office=claude`);
+    assert.equal(crossOfficeQuery.status, 400);
+    assert.equal(health.name, officeConfig.name, 'health endpoint uses the fixture config supplied to loadConfig');
+    return { name: health.name, agentName: expectedAgentName, taskIds: tasks.map(task => task.id) };
   } finally {
     try {
       if (runtime) await runtime.close({ graceMs: 0 });
@@ -146,15 +286,21 @@ async function httpSmoke(scratch, calls) {
 }
 
 /** Runs the former build, browser and HTTP smoke categories only on generated fixtures. */
-export async function runSafeSmoke({ projectRoot: _projectRoot, dependencyRoot = root } = {}) {
+export async function runSafeSmoke({ projectRoot, dependencyRoot = root, browserExecutablePath = '' } = {}) {
+  if (!projectRoot) throw new Error('A synthetic projectRoot is required for safe smoke checks.');
+  const fixtureRoot = path.resolve(projectRoot);
+  const relativeToTemp = path.relative(path.resolve(os.tmpdir()), fixtureRoot);
+  if (!relativeToTemp || relativeToTemp.startsWith('..') || path.isAbsolute(relativeToTemp)) {
+    throw new Error('projectRoot must be a temporary synthetic fixture root, never a checkout.');
+  }
   const scratch = makeTempRoot('agents-office-safe-check-');
   const calls = { providers: 0, usage: 0, mcp: 0 };
   try {
     const built = await buildSmoke(dependencyRoot, scratch);
-    const browser = await browserSmoke(built.html, dependencyRoot, scratch);
-    await httpSmoke(scratch, calls);
+    const browser = await browserSmoke(built.project, built.html, dependencyRoot, scratch, browserExecutablePath);
+    const http = await httpSmoke(fixtureRoot, scratch, calls);
     assert.deepEqual(calls, { providers: 0, usage: 0, mcp: 0 });
-    return { build: { status: 'passed', output: built.output }, browser, http: { status: 'passed' }, ...Object.fromEntries(Object.entries(calls).map(([key, value]) => [key, { calls: value }])) };
+    return { build: { status: 'passed', output: built.output }, browser, http: { status: 'passed', ...http }, ...Object.fromEntries(Object.entries(calls).map(([key, value]) => [key, { calls: value }])) };
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
@@ -170,8 +316,9 @@ async function main() {
   const testFiles = fs.readdirSync(testDir).filter(file => file.endsWith('.test.mjs')).sort().map(file => path.join(testDir, file));
   if (testFiles.length === 0) throw new Error('No fixture test files found.');
   console.log('Running isolated build/browser/HTTP smoke checks against synthetic data.');
-  const smoke = await runSafeSmoke({ projectRoot: root, dependencyRoot: root });
-  console.log(`Build: ${smoke.build.status}; browser: ${smoke.browser.status}${smoke.browser.reason ? ` (${smoke.browser.reason})` : ''}; HTTP: ${smoke.http.status}; provider/usage/MCP calls: 0/0/0.`);
+  const fixtureRoot = makeTempRoot('agents-office-check-fixture-');
+  const smoke = await runSafeSmoke({ projectRoot: fixtureRoot, dependencyRoot: root, browserExecutablePath: localChromiumExecutable() }).finally(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+  console.log(`Build: ${smoke.build.status}; browser: ${smoke.browser.status}${smoke.browser.reason ? ` (${smoke.browser.reason})` : ` [${smoke.browser.assertions.join(', ')}; ${smoke.browser.blockedExternalRequests} external requests blocked]`}; HTTP: ${smoke.http.status}; provider/usage/MCP calls: 0/0/0.`);
   const testHome = makeTempRoot('agents-office-test-home-');
   let result;
   try {
