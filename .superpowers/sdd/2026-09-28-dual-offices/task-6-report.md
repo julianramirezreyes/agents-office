@@ -43,6 +43,6 @@
 
 - La primera implementación se conserva en `ac5962e` y corrección anterior de fixture en `3f6854c` (`test: harden fixture-only dual office checks`).
 - Commit de continuación: `fc93541` (`test: restore fixture-safe office smoke coverage`).
-- Corrección P2 de revisión: guards exact-origin/canonical-realpath y cobertura ampliada; commit pendiente al cerrar esta unidad.
+- Corrección P2 de revisión: guards exact-origin/canonical-realpath y cobertura ampliada; commit `3b16146` (`test: tighten isolated office smoke guards`).
 - Rollback acotado: revertir `d5efe4b` elimina el forwarding a rosterLoader y sus dos pruebas de regresión; revertir `3b16146` retira solamente los guards/cobertura local añadidos. Ningún rollback borra o modifica datos del checkout fuente.
 - `skill_resolution: paths-injected` — TDD, work-unit-commits y verification-before-completion leídos en sus rutas requeridas.
