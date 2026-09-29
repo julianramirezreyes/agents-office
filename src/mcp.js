@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { MCP_LOGOS, MCP_BY_DEPT } from './mcplogos.js';
 import { applyAgentTools, profileShared } from './profile.js';
 import { splitConnectors } from './connectors-split.js';
-import { modelBrandsForProvider, providerDisplayName, providerUsageStatus } from './office-ui.js';
+import { emptyConnectorMessage, modelBrandsForProvider, providerDisplayName, providerUsageStatus } from './office-ui.js';
 
 // agent → tools they'd plausibly be driving (falls back to any connector in the dept's dock)
 export const AGENT_MCP = {
@@ -202,7 +202,7 @@ export function initMcp({ scene, hud, LAYOUT, DEPTS, FR, R, connectors = null })
     if (LIVE && !uniqKeys.length) { // honest empty state — nothing is wired until the user connects something
       const none = document.createElement('span');
       none.className = 'tc-none';
-      none.textContent = 'nothing yet — connect in claude.ai or run: claude mcp add';
+      none.textContent = emptyConnectorMessage(provider);
       topconn.appendChild(none);
     }
   }

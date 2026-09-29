@@ -32,7 +32,15 @@ export function officeOriginAllowed(origin, officeOrigins) {
   if (typeof origin !== 'string' || !origin || origin === 'null') return false;
   try {
     const parsed = new URL(origin);
-    return parsed.origin === origin && officeOrigins.includes(parsed.origin);
+    if (parsed.origin !== origin || !Array.isArray(officeOrigins)) return false;
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
+    if (!LOCAL_HOSTS.has(hostname)) return false;
+    return officeOrigins.some(configuredOrigin => {
+      try {
+        const configured = new URL(configuredOrigin);
+        return configured.protocol === parsed.protocol && configured.port === parsed.port;
+      } catch { return false; }
+    });
   } catch { return false; }
 }
 

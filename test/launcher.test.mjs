@@ -325,7 +325,31 @@ test('launcher_healthAllowsOnlyConfiguredOfficeOriginsWithoutCredentials', async
 test('launcher_originAllowlistRequiresAnExactConfiguredOrigin', () => {
   const allowed = ['http://127.0.0.1:4520', 'http://127.0.0.1:4521'];
   assert.equal(officeOriginAllowed(allowed[0], allowed), true);
+  assert.equal(officeOriginAllowed('http://localhost:4520', allowed), true);
+  assert.equal(officeOriginAllowed('http://[::1]:4521', allowed), true);
   for (const origin of ['http://127.0.0.1:4520.evil.example', 'http://127.0.0.1:4520/path', 'null', '*', undefined]) {
     assert.equal(officeOriginAllowed(origin, allowed), false);
+  }
+});
+
+test('launcher_healthAllowsSupportedLoopbackHostsOnlyOnConfiguredOfficePorts', async () => {
+  const config = await fixture();
+  const { base } = await startLauncher(config, {
+    spawnProcess: () => new Child(),
+    fetchHealth: async (_url, office) => ({ ok: true, office, provider: office }),
+  });
+
+  for (const origin of [
+    'http://localhost:4520', 'http://localhost:4521',
+    'http://[::1]:4520', 'http://[::1]:4521',
+  ]) {
+    const response = await fetch(`${base}/api/health`, { headers: { Origin: origin } });
+    assert.equal(response.headers.get('access-control-allow-origin'), origin);
+    assert.equal(response.headers.get('access-control-allow-credentials'), null);
+  }
+
+  for (const origin of ['http://evil.example:4520', 'http://localhost:4999', 'http://[::1]:4999']) {
+    const response = await fetch(`${base}/api/health`, { headers: { Origin: origin } });
+    assert.equal(response.headers.get('access-control-allow-origin'), null);
   }
 });

@@ -14,6 +14,12 @@ export function modelBrandsForProvider(provider) {
   return provider === 'claude' ? ['claude', 'chatgpt'] : [];
 }
 
+export function emptyConnectorMessage(provider) {
+  return provider === 'claude'
+    ? 'nothing yet — connect in claude.ai or run: claude mcp add'
+    : 'No connectors are available in this office.';
+}
+
 const isClaudeAlias = model => {
   const value = String(model).trim().toLowerCase();
   return CLAUDE_MODEL_ALIASES.has(value) || /^claude[-_. ]*(sonnet|opus|fable)(?:[-_. ]|$)/.test(value);

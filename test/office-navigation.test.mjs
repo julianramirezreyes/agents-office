@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { fromSummary, loadConnectors } from '../src/connectors.js';
-import { escapeHtml, modelBrandsForProvider, officeControls, providerDisplayName, providerUsageStatus, updateOfficeSwitch } from '../src/office-ui.js';
+import { emptyConnectorMessage, escapeHtml, modelBrandsForProvider, officeControls, providerDisplayName, providerUsageStatus, updateOfficeSwitch } from '../src/office-ui.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const shell = fs.readFileSync(path.join(root, 'src/shell.html'), 'utf8');
@@ -173,4 +173,10 @@ test('codexProgressAndCalendarCopyUseTheActiveProviderName', () => {
   assert.match(tasks, /sending with \$\{runtimeName\(\)\}/);
   assert.match(calendar, /\$\{runtimeName\(\)\} is naming the agent/);
   assert.doesNotMatch(calendar, /Claude names the agent|Claude is naming the agent/);
+});
+
+test('codexEmptyConnectorStateDoesNotSuggestClaudeSetupCommands', () => {
+  assert.equal(emptyConnectorMessage('codex'), 'No connectors are available in this office.');
+  assert.equal(emptyConnectorMessage('unknown'), 'No connectors are available in this office.');
+  assert.equal(emptyConnectorMessage('claude'), 'nothing yet — connect in claude.ai or run: claude mcp add');
 });
