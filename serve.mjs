@@ -60,6 +60,7 @@ export async function createOfficeRuntime({ officeConfig, provider, dataRoot, br
 const cfg = officeConfig || loadConfig();
 const OFFICE = cfg.office || 'claude';
 const PROVIDER = (typeof provider === 'string' ? provider : provider?.id) || cfg.provider || OFFICE;
+const LAUNCHER_URL = process.env.AO_LAUNCHER_URL || null;
 const codexProvider = PROVIDER === 'codex'
   ? (typeof provider?.runTask === 'function' ? provider : createCodexProvider({
     sdk: provider?.sdk,
@@ -519,7 +520,7 @@ const server = http.createServer(async (req, res) => {
       const claude = PROVIDER === 'claude';
       const mcpState = mcpSummary();
       const teamsState = claude ? TEAMS : { enabled: false, max: 0 };
-      return json(res, 200, { ok: true, office: OFFICE, provider: PROVIDER, version, backend: claude ? backend : PROVIDER,
+      return json(res, 200, { ok: true, office: OFFICE, provider: PROVIDER, version, backend: claude ? backend : PROVIDER, launcherUrl: LAUNCHER_URL,
         model: claude ? cfg.model : null, modelName: claude ? modelName(cfg.model) : null, models: claude ? MODEL_KEYS : [],
         effort: claude ? cfg.effort || '' : '', efforts: claude ? EFFORT_KEYS : [], name: cfg.name, brain: BRAIN, notes: graph.notes, depts: DEPT_KEYS,
         agents: agentsOut(), setup: setupMap(), capabilities: codexProvider?.capabilities() || null, routines: (l => ({ count: l.length, paused: l.filter(r => r.paused).length, depts: routines.ALLOWED }))(loadRoutines()), roster: { customised: roster.customised, briefed: roster.briefed, files: roster.files, problems: roster.problems }, skills: (({ count, shipped, brain, problems }) => ({ count, shipped, brain, problems }))(skills.summary()), tools: claude && backend === 'claude-cli', mcp: mcpState, teams: teamsState, browser: mcpState.browser });

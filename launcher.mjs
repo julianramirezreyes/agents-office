@@ -33,7 +33,7 @@ function response(res, status, body, type = 'application/json; charset=utf-8') {
   res.end(type.startsWith('application/json') ? JSON.stringify(body) : body);
 }
 
-function processEnvironment(office, paths) {
+function processEnvironment(office, paths, launcherUrl) {
   const env = { ...process.env };
   const prefix = office === 'claude' ? 'AO_CLAUDE' : 'AO_CODEX';
   Object.assign(env, {
@@ -45,6 +45,7 @@ function processEnvironment(office, paths) {
     [`${prefix}_PORT`]: String(paths.port),
     PORT: String(paths.port),
     AO_BRAIN: paths.brainPath,
+    AO_LAUNCHER_URL: launcherUrl,
   });
   if (office === 'codex' && paths.codexHome) env.CODEX_HOME = paths.codexHome;
   return env;
@@ -146,11 +147,15 @@ export function createLauncher({
         server.listen(launcherPort, host);
       });
 
+      const address = server.address();
+      const launcherHost = address.family === 'IPv6' ? `[${address.address}]` : address.address;
+      const launcherUrl = `http://${launcherHost}:${address.port}`;
+
       for (const office of OFFICES) {
         try {
           const child = spawnProcess(process.execPath, [path.join(root, 'serve.mjs')], {
             cwd: root,
-            env: processEnvironment(office, paths[office]),
+            env: processEnvironment(office, paths[office], launcherUrl),
             stdio: 'ignore',
           });
           const owned = { child, exit: null, failure: null, stopping: false };

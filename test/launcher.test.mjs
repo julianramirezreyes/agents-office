@@ -63,6 +63,7 @@ test('launcher_startsBothOfficesWithProviderSpecificEnvironment', async () => {
   assert.equal(spawned[0][2].env.PORT, '4520');
   assert.equal(spawned[0][2].env.AO_CLAUDE_CONFIG, path.join(config.root, 'office.config.local.json'));
   assert.equal(spawned[0][2].env.AO_CLAUDE_DATA, path.join(config.root, 'data'));
+  assert.equal(spawned[0][2].env.AO_LAUNCHER_URL, base);
   assert.equal(spawned[1][2].env.AO_OFFICE, 'codex');
   assert.equal(spawned[1][2].env.AO_PROVIDER, 'codex');
   assert.equal(spawned[1][2].env.PORT, '4521');
