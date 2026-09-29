@@ -15,6 +15,7 @@ Dejar un único worktree Git en `/home/julian/proyectos/agents-office`, sobre `m
 ## Plan y evidencia
 
 - [x] **WC-01 — Consolidar estado local y worktrees.** Confirmar ramas, ancestros, estados y manifiestos; crear la rama operativa desde `main`; copiar con destino exclusivo y verificar hashes; retirar solo originales verificados y cachés autorizadas; eliminar ambos worktrees secundarios sin forzar; integrar el registro operativo en `main`.
+- [x] **WC-01 — Consolidar estado local y worktrees.** Confirmar ramas, ancestros, estados y manifiestos; crear la rama operativa desde `main`; copiar con destino exclusivo y verificar hashes; retirar solo originales verificados y cachés autorizadas; eliminar ambos worktrees secundarios sin forzar; integrar el registro operativo en `main`.
   - Ruta: delegada, por múltiples ubicaciones y operaciones con riesgo de pérdida de datos.
   - Evidencia inicial: `feat/dual-offices` y `feat/live-translation` son ancestros de `main`; los tres worktrees y sus estados se inspeccionaron antes de modificar archivos.
   - Criterios de aceptación: un solo worktree en el checkout principal sobre `main`; archivos preservados con hashes idénticos; ramas de funcionalidad ancestrales; ningún archivo local ajeno sobrescrito; commit convencional de este registro.
@@ -25,6 +26,7 @@ Dejar un único worktree Git en `/home/julian/proyectos/agents-office`, sobre `m
 
 - TDD estricto: habilitado por las instrucciones del proyecto. No hay cambio de comportamiento que permita un ciclo RED → GREEN → REFACTOR; la comprobación funcional aplicable es `npm run check`.
 - Estrategia de entrega: `ask-on-risk`; pronóstico de cambios escritos menor a 400 líneas. Sin entrega remota solicitada.
+- Estado del espejo Engram: actualizado bajo `odd/workspace-consolidation/tasks` al cerrar la tarea.
 - Estado del espejo Engram: actualizado bajo `odd/workspace-consolidation/tasks` al cerrar la tarea.
 
 ## Resultados de la unidad delegada
@@ -38,12 +40,7 @@ Dejar un único worktree Git en `/home/julian/proyectos/agents-office`, sobre `m
 - El registro se confirmó en `cf63f04361d7a76f32bdfd127b99e1e67df2e046` y se integró explícitamente en `main` mediante `e47debb77de7de9146cc49798feadeedbd8ebc0f`. En `main`, la segunda ejecución aislada de `npm run check` terminó con código 0: compilación, navegador y HTTP aprobados; 139 pruebas aprobadas, 0 fallidas; llamadas a proveedor, uso y MCP: 0/0/0.
 - La verificación estructural final confirmó un solo worktree, `main`, los 12 SHA-256 conservados, las tres ramas como ancestros, los cinco grupos de rutas locales protegidas y únicamente los dos archivos no rastreados preexistentes. `git diff --check` terminó con código 0. No se hizo push ni PR.
 
-## Cierre operativo posterior
-
-- El orquestador identificó el proceso heredado PID `2710662` como `node serve.mjs` con directorio de trabajo en el checkout principal y le envió `SIGTERM`. Esta acción fue posterior a la unidad delegada; la comprobación posterior no mostró ese PID ni escuchas en los puertos `4519`, `4520` y `4521`.
-- El orquestador eliminó con `rmdir` el contenedor vacío `agents-office-worktrees`; se verificó que la ruta ya no existe.
-- Un spot-check adicional de `npm run check`, con `HOME`, configuraciones y `PATH` de CLI aislados, terminó con código 0: compilación, navegador y HTTP aprobados; 139/139 pruebas aprobadas; llamadas a proveedor, uso y MCP: 0/0/0. No se ejecutó `check:live` ni una prueba con proveedor real.
-
 ## Siguiente paso
 
+No queda una acción local pendiente. La entrega remota sigue sin autorización.
 No queda una acción local pendiente. La entrega remota sigue sin autorización.
