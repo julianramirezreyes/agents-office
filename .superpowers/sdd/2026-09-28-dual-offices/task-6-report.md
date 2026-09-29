@@ -40,6 +40,6 @@
 ## Commit y rollback
 
 - La primera implementación se conserva en `ac5962e` y corrección anterior de fixture en `3f6854c` (`test: harden fixture-only dual office checks`).
-- Este commit de continuación se anotará aquí después de crear el commit Conventional Commits.
+- Commit de continuación: `fc93541` (`test: restore fixture-safe office smoke coverage`).
 - Rollback acotado: revertir el commit de continuación conserva los commits previos; no borra ni modifica datos del checkout fuente.
 - `skill_resolution: paths-injected` — TDD, work-unit-commits y verification-before-completion leídos en sus rutas requeridas.
