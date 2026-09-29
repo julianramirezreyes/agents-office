@@ -1,6 +1,6 @@
 # Migrar `agents-office` a un fork personal
 
-Preparar la migración de `ajsahni/agents-office` al fork público `julianramirezreyes/agents-office`, integrando primero el estado más reciente observado del upstream y las ramas locales en el orden solicitado. Conservar el vínculo `upstream` para futuras sincronizaciones. FM-01 ya hizo un fetch público y anónimo de heads/tags; no se ejecutaron fusiones ni publicación.
+Preparar la migración de `ajsahni/agents-office` al fork público `julianramirezreyes/agents-office`, integrando primero el estado más reciente observado del upstream y las ramas locales en el orden solicitado. Conservar el vínculo `upstream` para futuras sincronizaciones. FM-01 verificó las refs con fetch anónimo y FM-04 creó/verificó el fork y configuró los remotos. Todavía no se han fusionado ni publicado ramas.
 
 ## Objetivo y problema
 
@@ -20,9 +20,9 @@ Trasladar el trabajo propio al fork personal sin perder la base upstream ni publ
 | Referencia | Estado conocido |
 |---|---|
 | Checkout fuente `/home/julian/proyectos/agents-office` | `feat/live-translation` en `10da3d7`; sucio en `.gitignore`, `dist/command-centre-v2.html`, `package-lock.json`, `src/braingraph.js`; no rastreados `.codegraph/` y `AGENTS.md`. Preservarlos íntegros. |
-| Worktree de esta rama | `feat/dual-offices` en `e9da6f958cb72ebc93f00cdb0e7b7d7b347b833d`; conserva la base funcional conocida `d7ad60b` y añade solo commits documentales del plan. |
+| Worktree de esta rama al inicio de FM-01 | `feat/dual-offices` en `e9da6f958cb72ebc93f00cdb0e7b7d7b347b833d`; conserva la base funcional conocida `d7ad60b` y añade solo commits documentales del plan. |
 | `main` local / caché | `main` en `51f9973f411f50c36ab94a01300c6239e8dd49cc`; `origin/main` cacheado en `2d4700189ee0900060a97ff3ab79f9eb0386ca23`. |
-| Remotos | `origin` sigue en `https://github.com/ajsahni/agents-office.git`; `upstream` fue agregado con esa misma URL pública. Ambos quedaron sin cambios posteriores. |
+| Remotos al inicio de FM-01 | `origin` apuntaba a `https://github.com/ajsahni/agents-office.git`; `upstream` se agregó entonces con esa URL pública. La configuración actual, posterior a FM-04, está en “Evidencia FM-04”. |
 
 Estos datos son el punto de partida reportado, no sustituyen una nueva lectura del estado antes de actuar.
 
@@ -39,9 +39,9 @@ Estos datos son el punto de partida reportado, no sustituyen una nueva lectura d
 ## Tareas estables
 
 - [x] **FM-01 — Obtener y comparar el upstream**. Verificar el estado de ambos worktrees y cambios locales; agregar/verificar `upstream` sin alterar el destino de `origin`, hacer un fetch anónimo de todas las heads/tags y registrar puntas, divergencias y merge-bases. Evidencia exacta en “Evidencia FM-01”.
-- [ ] **FM-02 — Integrar upstream en `feat/live-translation`**. Incorporar la punta upstream verificada antes de crear el fork, con una operación no destructiva y sin sobrescribir cambios sucios. Revisar conflictos y conservar los cambios locales; detenerse para decisión si no se puede demostrar una resolución segura. Registrar los commits resultantes.
+- [ ] **FM-02 — Integrar upstream en una worktree limpia de migración**. Incorporar primero la punta upstream verificada en una rama temporal aislada, sin sobrescribir los cambios sucios de `feat/live-translation`. Registrar los commits y revisar conflictos; no trasladar la punta a la rama nombrada hasta resolver cómo preservar el checkout original.
 - [ ] **FM-03 — Fusionar las ramas propias en el orden solicitado**. Fusionar `feat/dual-offices` en `feat/live-translation` y, después de verificar el resultado, fusionar `feat/live-translation` en `main`. Mantener los worktrees y el checkout fuente en estados identificables; no hacer reset para forzar una fusión.
-- [ ] **FM-04 — Crear y configurar el fork personal**. Crear o verificar el fork público autorizado `julianramirezreyes/agents-office`; configurar `origin` hacia el fork y `upstream` hacia `ajsahni/agents-office`. Confirmar URLs y relación de fork antes de publicar. No hacer PR ni push al upstream.
+- [x] **FM-04 — Crear y configurar el fork personal**. Fork público creado y verificado para `julianramirezreyes/agents-office`; `origin` apunta al fork, `upstream` al repo original y el push a upstream está deshabilitado. Evidencia en “Evidencia FM-04”. No se han publicado ramas.
 - [ ] **FM-05 — Publicar las ramas propias y comprobar sincronización futura**. Publicar únicamente las ramas aprobadas al fork personal; comprobar que las ramas remotas tienen las puntas esperadas y documentar el flujo futuro: fetch de `upstream`, comparación/revisión y fusión explícita de actualizaciones. No afirmar que ese flujo fue probado hasta observarlo.
 
 ## Criterios de aceptación
@@ -50,7 +50,7 @@ Estos datos son el punto de partida reportado, no sustituyen una nueva lectura d
 - [x] Se consultó upstream antes de crear el fork; el fetch observó dos commits upstream no contenidos en `main` local. No hay commits upstream nuevos respecto de `origin/main` cacheado.
 - [ ] Se integran los cambios remotos solo desde las referencias verificadas.
 - [ ] Las fusiones se completan en este orden: upstream a `feat/live-translation`, `feat/dual-offices` a `feat/live-translation`, y `feat/live-translation` a `main`.
-- [ ] `origin` apunta al fork personal y `upstream` al repo original; el fork es público y conserva su relación upstream.
+- [x] `origin` apunta al fork personal y `upstream` al repo original; el fork es público y conserva su relación upstream.
 - [ ] Solo ramas propias se publican al fork; no hay PR ni push al upstream original.
 - [ ] Las puntas finales, commits de fusión y cualquier conflicto/resolución están anotados y verificables.
 - [ ] El flujo futuro para traer upstream está explicado y evita mezclarlo automáticamente o sobrescribir trabajo local.
@@ -85,7 +85,7 @@ Ruta ODD: **delegated direct** para la migración operativa, por requerir varias
 
 ## Progreso y evidencia
 
-- **Estado:** FM-01 completada; `upstream` agregado y fetch anónimo exitoso. Ninguna fusión, fork ni publicación ejecutada.
+- **Estado:** FM-01 y FM-04 completas; FM-02, FM-03 y FM-05 pendientes. No se han fusionado ni publicado ramas.
 - **Documento local:** `odd/tasks/fork-migration.md`.
 - **Comprobaciones de preparación:** ambas worktrees identificadas; estado fuente y objetivo se capturó antes y después del fetch (`GIT_OPTIONAL_LOCKS=0`). El checkout fuente se mantuvo en `feat/live-translation` (`10da3d7d99b7659dc0539b5898ba20633eb2582a`) con `.gitignore`, `dist/command-centre-v2.html`, `package-lock.json`, `src/braingraph.js` modificados y `.codegraph/`, `AGENTS.md` no rastreados. El worktree de tarea se mantuvo en `feat/dual-offices` (`e9da6f958cb72ebc93f00cdb0e7b7d7b347b833d`) con `.codegraph/` no rastreado.
 
@@ -101,6 +101,15 @@ Ruta ODD: **delegated direct** para la migración operativa, por requerir varias
 - **TDD/verificación del producto:** pendiente para la ejecución de integración; modo estricto del proyecto indicado como habilitado, runner `node --test test/*.test.mjs`.
 - **Commit de introducción del documento:** `3bd37ada89eed0b5aad3604ddc3d00e6df4b5ba3` (`docs: plan personal fork migration`).
 
-## Siguiente paso
+## Evidencia FM-04
 
-Comenzar FM-02 desde las refs verificadas, sin crear el fork todavía. Resolver primero cómo trabajar sin afectar el checkout fuente sucio; pedir decisión si no hay una vía demostrablemente segura. El upstream coincide con `origin/main` cacheado, pero `main` local está dos commits detrás.
+- **Fork:** `https://github.com/julianramirezreyes/agents-office`, creado con `gh repo fork`; cuenta verificada `julianramirezreyes`.
+- **Verificación REST:** `fork=true`, `parent=ajsahni/agents-office`, `private=false`, rama predeterminada `main`.
+- **Remotos locales:** `origin` tiene fetch y push hacia el fork personal; `upstream` tiene fetch hacia `https://github.com/ajsahni/agents-office.git` y push deshabilitado (`NO_PUSH_TO_UPSTREAM`). `remote.pushDefault=origin`.
+- **Límites:** no se hizo push de ramas, PR ni merge. El checkout fuente de `feat/live-translation` conserva sin cambio sus archivos sucios previos.
+
+## Siguiente paso y bloqueo
+
+FM-02/FM-03 siguen pendientes porque el checkout `feat/live-translation` está sucio en `.gitignore`, `dist/command-centre-v2.html` y `package-lock.json`, los mismos archivos que cambia `feat/dual-offices`. No integrar directamente en ese worktree ni limpiar sus cambios. La vía recomendada es preparar una worktree limpia sobre una rama temporal y aplicar allí, en orden, `upstream/main` y luego `feat/dual-offices`. Se necesita resolver cómo entregar luego esa punta a la rama nombrada `feat/live-translation` sin perder ni reubicar cambios de usuario sin autorización. FM-05 queda pendiente hasta que las ramas estén integradas; aún no se ha publicado ninguna.
+
+El upstream verificado coincide con `origin/main` cacheado, pero `main` local está dos commits detrás.
