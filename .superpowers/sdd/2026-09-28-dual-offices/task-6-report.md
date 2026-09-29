@@ -6,9 +6,9 @@
 
 ## Cambios y evidencia
 
-- `check.mjs` vuelve a cubrir build, UI/browser y servidor HTTP sin leer el estado del checkout fuente. Exige que `projectRoot` sea un directorio temporal bajo `os.tmpdir()`, ejecuta el build en una copia temporal y usa HOME/npmrc aislados con npm offline.
-- Browser smoke real con `/usr/bin/google-chrome` headless, perfil/HOME temporales de ruta corta, API fixtures y routing Playwright que permite loopback y aborta cualquier URL externa. Aserciones observadas: roster, command bar, TEAM, rutina, CALENDAR, navegación de teclado B/G y señal/estado de aprobación; un request a `example.invalid` fue bloqueado antes de red.
-- HTTP smoke con `createOfficeRuntime` y `loadConfig({root: fixture})` consume config, roster, brain y tasks del fixture. Comprueba `/api/brain`, `/api/skills`, `/api/lessons`, `/api/routines`, health/tasks/usage/MCP/agents y rutas negativas; provider, usage y MCP son dobles con contadores `0/0/0`.
+- `check.mjs` vuelve a cubrir build, UI/browser y servidor HTTP sin leer el estado del checkout fuente. Exige un `projectRoot` canónico, realpath directo dentro de `os.tmpdir()` (rechaza symlinks/escapes antes de cualquier I/O), ejecuta el build en una copia temporal y usa HOME/npmrc aislados con npm offline.
+- Browser smoke real con `/usr/bin/google-chrome` headless, perfil/HOME temporales de ruta corta y API fixtures. Playwright permite exclusivamente el origin HTTP exacto del servidor efímero; bloquea localhost aliases, otro puerto, `file:` y cualquier destino externo. Aserciones observadas: tarjetas de departamentos, panel/roster, command bar, creación TEAM con lead/pieces/chips, rutina y calendario detallado con programación/date-start, board, foco de departamento, grafo, teclado y aprobación; el request a `example.invalid` fue bloqueado antes de red.
+- HTTP/domain smoke con `createOfficeRuntime` y `loadConfig({root: fixture})` consume config, roster, brain/skill y tasks del fixture. Comprueba `/api/brain`, `/api/skills`, `/api/lessons`, `/api/routines`, health/tasks/usage/MCP/agents y rutas negativas, además de roster/entrevista, validación de rutinas, precedencia de modelos/esfuerzo y parser de equipos; provider, usage y MCP son dobles con contadores `0/0/0`.
 - Regresión de aislamiento prueba que `runSafeSmoke` rechaza el checkout como `projectRoot` antes de leerlo y que sentinels de config, roster, brain y data permanecen sin cambios (se exceptúa solo `data-codex/tasks.json`, que el runtime puede normalizar al persistir).
 - `loadRoster` acepta un root explícito para Claude; snapshot prueba el roster/config sintéticos consumidos por runtime y permanece byte-identical. La navegación sigue el `href` de `updateOfficeSwitch` hasta el destino HTTP y comprueba que la tarea activa sigue intacta y que no se llamó cancelación.
 - Los casos de coexistencia del worktree conservan dobles sintéticos: tareas simultáneas mediante `createLauncher` y children dobles, sin oficinas/procesos reales; storage/health sin cruce, fallo de Codex aislado, restart de una oficina que preserva la otra e historial.
@@ -21,11 +21,12 @@
 ## Verificación observada
 
 - RED observado durante la corrección: el runner inicial falló al comprobar que el endpoint brain tenía una nota porque el root vacío de `npm run check` no contenía fixture de brain; luego una expectativa fija `SENTINEL` no coincidía con el config sintético `Synthetic Codex Office`. Se añadieron fixtures faltantes y las aserciones se conectaron a config/roster consumidos.
-- Otro RED observado: navegador abortó con `Socket path too long` al quedar el perfil bajo un HOME/root de test anidado; luego `page.goto` agotó el timeout de 8s. Perfil y HOME se aislaron en rutas cortas temporales, y navegación local tiene 20s; `node --test test/check-smoke.test.mjs` pasó 2/2 incluyendo browser real.
-- Suite completa, ejecutada dentro de `npm run check` en HOME/npmrc temporales: **135/135 pasan**.
-- `npm run check` con `CHECK_BROWSER_EXECUTABLE=/usr/bin/google-chrome`, `npm_config_offline=true` y HOME/npmrc temporales: build **passed**, browser **passed** (roster/command-bar/team/routine/calendar/keyboard/approval; 1 URL externa bloqueada), HTTP **passed**, provider/usage/MCP **0/0/0**, suite **135/135**, exit 0.
+- Otro RED observado: navegador abortó con `Socket path too long` al quedar el perfil bajo un HOME/root de test anidado; luego `page.goto` agotó el timeout de 8s. Perfil y HOME se aislaron en rutas cortas temporales.
+- RED de regresión P2 observado: las pruebas nuevas fallaron antes de añadir `isBrowserRequestAllowed` y `canonicalFixtureRoot`. GREEN: `node --test --test-name-pattern='browserRequestPolicy|fixtureRootRejects' test/check-smoke.test.mjs` — 2/2. El root symlink de prueba apunta a un sentinel bajo HOME y confirma que permanece intacto.
+- `node --test test/*.test.mjs`: **137/137 pasan**.
+- `npm run check` con `CHECK_BROWSER_EXECUTABLE=/usr/bin/google-chrome`, `npm_config_offline=true` y HOME/npmrc temporales: build **passed**, browser **passed** (13 categorías UI; 1 URL externa bloqueada), HTTP/domain **passed**, provider/usage/MCP **0/0/0**, suite **137/137**, exit 0. Antes de ejecutarlo se inspeccionaron `package.json`, todo `check.mjs` y los subprocesos: solo build en copia sintética, HTTP/runtime con dobles y tests aislados; no se consulta config/roster/brain/data del checkout ni provider/auth.
 - `npm run build` se ejecutó en el worktree aislado con brain sintético; restauré únicamente el `src/braingraph.js` incidental generado por el build. Segundo build sin brain sintético conservó el graph original. SHA observado de `src/braingraph.js`: `81a810ca6b97223a76f682294f4c93955071211c2c66d5d6d505f46dea98ec47`; SHA de `dist/command-centre-v2.html`: `e17dc929e1351b02551b62a1e6ceaf6b0506daa284b2615f91bfffad54cc770d`. Sin cambios en `dist`.
-- `git diff --check`: limpio antes de documentar; se vuelve a correr tras cambios documentales.
+- `git diff --check`: limpio tras la corrección P2 y se vuelve a ejecutar tras cambios documentales.
 - No se hizo instalación ni solicitud de red, ni se usó proveedor/auth/estado de credenciales, browser profile de usuario, child real de oficina o puerto predeterminado. `check:live` no se ejecutó.
 
 ## Archivos principales
@@ -41,5 +42,6 @@
 
 - La primera implementación se conserva en `ac5962e` y corrección anterior de fixture en `3f6854c` (`test: harden fixture-only dual office checks`).
 - Commit de continuación: `fc93541` (`test: restore fixture-safe office smoke coverage`).
+- Corrección P2 de revisión: guards exact-origin/canonical-realpath y cobertura ampliada; commit pendiente al cerrar esta unidad.
 - Rollback acotado: revertir el commit de continuación conserva los commits previos; no borra ni modifica datos del checkout fuente.
 - `skill_resolution: paths-injected` — TDD, work-unit-commits y verification-before-completion leídos en sus rutas requeridas.
