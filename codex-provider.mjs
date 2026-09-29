@@ -86,7 +86,7 @@ export function createCodexProvider({ sdk, codexHome, workspaceRoot = process.cw
       }
     },
 
-    async runChat({ prompt, cwd = root, model, approvalPolicy: requestedApproval = approvalPolicy } = {}) {
+    async runChat({ prompt, cwd = root, model, sandboxMode: requestedSandbox = 'read-only', approvalPolicy: requestedApproval = 'never' } = {}) {
       let canonicalRoot;
       let workingDirectory;
       try {
@@ -101,8 +101,8 @@ export function createCodexProvider({ sdk, codexHome, workspaceRoot = process.cw
       if (!VALID_SANDBOX.has(sandboxMode) || !VALID_APPROVAL.has(approvalPolicy)) {
         return { status: 'blocked', error: 'Configured Codex policy is unsupported; no chat was started', provider: 'codex' };
       }
-      if (requestedApproval !== approvalPolicy) {
-        return { status: 'blocked', error: 'Requested approval policy is not supported by the configured Codex policy', provider: 'codex' };
+      if (requestedSandbox !== 'read-only' || requestedApproval !== 'never') {
+        return { status: 'blocked', error: 'Codex chat requires read-only access and never-approval policy', provider: 'codex' };
       }
       if (model && CODEX_ALIAS.test(model)) {
         return { status: 'blocked', error: 'Claude model aliases are not valid Codex model identifiers', provider: 'codex' };
@@ -112,7 +112,7 @@ export function createCodexProvider({ sdk, codexHome, workspaceRoot = process.cw
       let threadId;
       try {
         const client = await getCodex();
-        const options = { workingDirectory, sandboxMode, approvalPolicy };
+        const options = { workingDirectory, sandboxMode: 'read-only', approvalPolicy: 'never' };
         if (model) options.model = model;
         thread = client.startThread(options);
         const result = await thread.run(String(prompt || ''));

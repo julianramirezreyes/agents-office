@@ -176,6 +176,15 @@ async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RU
   });
 }
 const ask = async (system, user, opts) => (await askX(system, user, { tools: false, ...opts })).text;
+async function generateOfficeText(system, user, opts) {
+  if (PROVIDER !== 'codex') return ask(system, user, opts);
+  if (typeof codexProvider?.runChat !== 'function') throw new Error('Codex text generation is unavailable');
+  const result = await codexProvider.runChat({ prompt: `${system}\n\n${user}` });
+  if (result?.status !== 'completed' || typeof result.text !== 'string' || !result.text.trim()) {
+    throw new Error('Codex text generation failed');
+  }
+  return result.text;
+}
 const translator = createTranslator({ dataDir: DATA, ask: (system, user) => ask(system, user, { effort: 'low' }) }); // V3.7: cached under data/i18n/<lang>.json
 function parseJSON(text) {
   const s = text.replace(/```json|```/g, ''); const a = s.indexOf('{'), b = s.lastIndexOf('}');
@@ -655,7 +664,7 @@ const server = http.createServer(async (req, res) => {
       const a = AGENTS.find(x => x.id === agent);
       const message = text.trim();
       const boundedHistory = boundedChatHistory(history, message);
-      if (PROVIDER === 'claude') {
+      if (PROVIDER === 'claude' || PROVIDER === 'codex') {
         if (!onboard.active(DATA, a.department)) { // V3.5: "every weekday at 8am, …" · "routines" · "pause …" · "run … now" — unless the lead is mid-interview
           const rc = await routinesChat(a, message);
           if (rc) return json(res, 200, { reply: rc.reply, read: [], tools: [], interview: false, routine: rc.routine || null, routines: true, provider: PROVIDER, providerStatus: 'completed' });
@@ -663,7 +672,7 @@ const server = http.createServer(async (req, res) => {
         if (leadOf(a.department).id === a.id) { // the department lead can run the set-up interview
           refreshSkills();
           const o = await onboard.handle(message, { dept: a.department, deptName: DEPTS[a.department].name, lead: a, agents: AGENTS.filter(x => x.department === a.department),
-            connected: mcpSummary().servers?.filter(x => x.status === 'connected').map(x => x.name || x.key) || [], brainPath: BRAIN, dataDir: DATA, ask, business: cfg.name, afterWrite: refreshSkills });
+            connected: mcpSummary().servers?.filter(x => x.status === 'connected').map(x => x.name || x.key) || [], brainPath: BRAIN, dataDir: DATA, ask: generateOfficeText, provider: PROVIDER, business: cfg.name, afterWrite: refreshSkills });
           if (o) { if (o.wrote) console.log(`★ ${a.name} set up ${DEPTS[a.department].name}: ${o.wrote.briefs.length} briefs${o.wrote.skill ? ', skill ' + o.wrote.skill.name : ''}`); return json(res, 200, { reply: o.reply, read: [], tools: [], interview: !o.wrote, setup: setupMap(), provider: PROVIDER, providerStatus: 'completed' }); }
         }
       }

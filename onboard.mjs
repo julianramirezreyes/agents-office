@@ -63,7 +63,7 @@ export async function handle(text, ctx) {
   return { reply: lines.join('\n'), wrote };
 }
 
-/** Claude turns the answers into briefs + one skill, and they are written into the brain. */
+/** The configured read-only text provider turns the answers into briefs + one skill, then app-owned validation writes them. */
 export async function writeUp(answers, ctx) {
   const { dept, deptName: d, lead, agents, connected = [], brainPath, ask, business = '' } = ctx;
   const roster = agents.map(a => `- ${a.id} · ${a.name}${a.lead ? ' (lead)' : ''} · ${a.role} · ${a.does}`).join('\n');
@@ -77,7 +77,7 @@ export async function writeUp(answers, ctx) {
     'Return: {"briefs":[{"id":"<agent id>","brief":"<text>"}],"skill":{"name":"","description":"","agents":[],"body":"","template":""}|null,"try":""}';
   let j = null; try { const t = await ask(system, user, { maxTokens: 3000, timeout: 180000 }); const s = t.replace(/```json|```/g, ''); j = JSON.parse(s.slice(s.indexOf('{'), s.lastIndexOf('}') + 1)); } catch (e) { j = { briefs: [], skill: null, try: '', error: e.message }; }
   const ids = new Set(agents.map(a => a.id)); const problems = [];
-  if (j.error) problems.push('Claude did not return usable instructions (' + j.error.split('\n')[0] + ')');
+  if (j.error) problems.push(`${ctx.provider || 'Claude'} did not return usable instructions (${j.error.split('\n')[0]})`);
   // briefs → <brain>/Agents Office/agents.json (merged: other agents and other fields untouched)
   const briefs = (Array.isArray(j.briefs) ? j.briefs : []).filter(b => b && ids.has(b.id) && String(b.brief || '').trim()).map(b => ({ id: b.id, brief: String(b.brief).trim().slice(0, 2000) }));
   for (const b of (Array.isArray(j.briefs) ? j.briefs : [])) if (b && b.id && !ids.has(b.id)) problems.push(`"${b.id}" is not in ${d}`);

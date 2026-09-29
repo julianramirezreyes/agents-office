@@ -133,6 +133,29 @@ test('codexProvider_runsChatOnFreshPolicyBoundThreadsAndReturnsFinalResponse', a
   assert.equal(second.threadId, 'chat-2');
 });
 
+test('codexProvider_alwaysUsesReadOnlyNeverApprovalForChatAndRejectsBroaderRequests', async () => {
+  const calls = { thread: [] };
+  class FakeCodex {
+    startThread(options) {
+      calls.thread.push(options);
+      return { async run() { return { finalResponse: 'Read-only answer' }; } };
+    }
+  }
+  const provider = createCodexProvider({
+    sdk: { Codex: FakeCodex },
+    workspaceRoot: process.cwd(),
+    policy: { sandboxMode: 'workspace-write', approvalPolicy: 'on-request' },
+  });
+
+  const result = await provider.runChat({ prompt: 'Answer without changing files' });
+  const broader = await provider.runChat({ prompt: 'Write a file', sandboxMode: 'workspace-write', approvalPolicy: 'on-request' });
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(calls.thread[0], { workingDirectory: process.cwd(), sandboxMode: 'read-only', approvalPolicy: 'never' });
+  assert.equal(broader.status, 'blocked');
+  assert.equal(calls.thread.length, 1, 'the broader policy must not reach the SDK');
+});
+
 test('codexProvider_blocksUnsupportedChatPolicyBeforeStartingSdk', async () => {
   let starts = 0;
   const provider = createCodexProvider({

@@ -16,7 +16,7 @@ import { initBrain } from './brain.js';
 import { initHero, HERO } from './hero.js';
 import { initI18n } from './i18n.js'; // V3.7: the EN/ES toggle in the top bar (inert in demo mode)
 import { readRealOnly, writeRealOnly, shouldSeedDemo, shouldShowRealToggle, realOnly } from './real-only.js'; // V3.7: real-only
-import { chatFailureMessage, chatHistoryForRequest } from './office-ui.js';
+import { chatFailureMessage, chatHistoryForRequest, requestChatWithThinking } from './office-ui.js';
 if (HERO) document.body.classList.add('hero'); // the website hero: no Sahni.ai mark or licence line on top of the page that already carries them // sahni.ai/custom hero mode (16 Sep 2026): opt-in via window.HERO, no-op otherwise
 let tasks = null; // V3 task boards — initialised after the rail constants exist
 let activeProvider = 'office runtime';
@@ -601,6 +601,7 @@ function syncOverviewBtn() {
 
 /* ---------- focus rail: dept billboard + activity rows; agent CHAT & ACTIVITY slide-over ---------- */
 const chatHist = {};
+let chatRequestSequence = 0;
 const rail = document.getElementById('rail');
 const vignette = document.getElementById('vignette');
 const mMsgs = document.getElementById('mMsgs');
@@ -857,16 +858,11 @@ function sendChat(text) {
     const tr = tasks && tasks.handleChat(id, text); // "add task: …" / "what's on the board"
     if (tr) { chatPush(id, { who: 'agent', text: tr }); return; }
     if (tasks && tasks.isLive()) { // LIVE: a real conversation with the agent, grounded in the brain
-      chatPush(id, { who: 'work', i: '…', text: `${r.a.name} is thinking` });
-      fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ agent: id, text, history }) })
-        .then(async res => {
-          const data = await res.json();
-          if (!res.ok) { const error = new Error(data.error || res.statusText); error.provider = data.provider; throw error; }
-          return data;
-        })
+      const thinking = { who: 'work', i: '…', text: `${r.a.name} is thinking`, requestId: ++chatRequestSequence };
+      requestChatWithThinking(chatHist[id], thinking, () => fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agent: id, text, history }) }),
+      () => { if (modalOpen === id && modalTab === 'chat') renderChat(id); })
         .then(j => {
-          const h = chatHist[id]; const k = h.findIndex(m => m.who === 'work' && m.text === `${r.a.name} is thinking`); if (k >= 0) h.splice(k, 1);
           chatPush(id, { who: 'agent', text: j.reply });
           if (j.routines && tasks.refresh) tasks.refresh(); // a routine was set, paused, run or deleted in chat
           if (j.read) for (const n of j.read.slice(0, 2)) brain.readNote(id, n);

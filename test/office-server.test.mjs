@@ -144,6 +144,61 @@ test('codexChat_usesAgentContextAndBoundedHistoryWithoutDuplicatingCurrentMessag
   assert.equal(calls[0].prompt.split('Owner: Current voice request').length - 1, 1);
 });
 
+test('codexChatRoutesRoutineCommandsThroughTheCodexOfficesOwnAppHandler', async () => {
+  const codexPaths = fixture(), claudePaths = fixture();
+  const agent = { id: 'fixture-email', department: 'emails', lead: true, name: 'EMAILS ASSISTANT', role: 'Writer', does: 'writes email copy', tools: [] };
+  let codexCalls = 0;
+  const codex = await startRuntime({ ...codexPaths, office: 'codex', port: 0, provider: {
+    id: 'codex', async runTask() {}, async runChat() { codexCalls++; return { status: 'completed', text: 'The model should not handle routines.' }; },
+  }, runtimeOptions: { rosterLoader: () => ({ agents: [agent], problems: [], customised: 1, briefed: 0, files: [] }) } });
+  const claude = await startRuntime({ ...claudePaths, office: 'claude', port: 0, provider: { id: 'claude' }, runtimeOptions: {
+    rosterLoader: () => ({ agents: [agent], problems: [], customised: 1, briefed: 0, files: [] }),
+  } });
+
+  const response = await fetch(`${codex.base}/api/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ agent: agent.id, text: 'every weekday at 8am, prepare launch digest' }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).routines, true);
+  assert.equal(codexCalls, 0);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(codexPaths.brainPath, 'Agents Office', 'routines.json'), 'utf8')).routines.length, 1);
+  assert.equal(fs.existsSync(path.join(claudePaths.brainPath, 'Agents Office', 'routines.json')), false);
+  await claude.runtime.close({ graceMs: 0 });
+  runtimes.splice(runtimes.indexOf(claude.runtime), 1);
+});
+
+test('codexChatRoutesSetupInterviewThroughValidatedHandlerAndReadOnlyTextGeneration', async () => {
+  const paths = fixture();
+  const agent = { id: 'fixture-email', department: 'emails', lead: true, name: 'EMAILS ASSISTANT', role: 'Writer', does: 'writes email copy', tools: [] };
+  const generated = { briefs: [{ id: agent.id, brief: 'Use the owner-approved voice.' }], skill: { name: '../launch-email', description: 'Prepare launch email', agents: [agent.id], body: '# Launch email\nUse the source notes.', template: '' }, try: 'Draft the launch email' };
+  const prompts = [];
+  const provider = { id: 'codex', async runTask() {}, async runChat({ prompt }) { prompts.push(prompt); return { status: 'completed', text: JSON.stringify(generated) }; } };
+  const { base } = await startRuntime({ ...paths, office: 'codex', port: 0, provider, runtimeOptions: {
+    rosterLoader: () => ({ agents: [agent], problems: [], customised: 1, briefed: 0, files: [] }),
+  } });
+  const send = async text => fetch(`${base}/api/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agent: agent.id, text }),
+  });
+
+  const opening = await send('set up');
+  assert.equal(opening.status, 200);
+  assert.match((await opening.json()).reply, /Question 1 of 5/);
+  for (const answer of ['Email enquiries', 'Prepare a launch email', 'A concise result', 'Never invent claims']) {
+    assert.equal((await send(answer)).status, 200);
+  }
+  const completed = await send('We use the brand guide');
+
+  assert.equal(completed.status, 200);
+  assert.match((await completed.json()).reply, /Here is what I wrote down/);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /owner's answers/i);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(paths.brainPath, 'Agents Office', 'agents.json'), 'utf8')).agents, [{ id: agent.id, brief: 'Use the owner-approved voice.' }]);
+  assert.equal(fs.existsSync(path.join(paths.brainPath, 'Agents Office', 'skills', '..-launch-email', 'SKILL.md')), true);
+  assert.equal(fs.existsSync(path.join(paths.root, 'launch-email', 'SKILL.md')), false);
+});
+
 test('codexChat_rejectsInvalidAgentOrMessageBeforeCallingProvider', async () => {
   const paths = fixture();
   let calls = 0;

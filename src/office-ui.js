@@ -21,6 +21,24 @@ export function chatFailureMessage(provider, reason) {
   return `${providerDisplayName(provider)} chat failed: ${String(reason || 'request unavailable').slice(0, 240)}`;
 }
 
+export async function requestChatWithThinking(history, thinking, request, onStart = () => {}) {
+  history.push(thinking);
+  onStart();
+  try {
+    const response = await request();
+    const data = await response.json();
+    if (!response.ok) {
+      const error = new Error(data.error || response.statusText || 'Chat request failed');
+      error.provider = data.provider;
+      throw error;
+    }
+    return data;
+  } finally {
+    const index = history.indexOf(thinking);
+    if (index >= 0) history.splice(index, 1);
+  }
+}
+
 export function modelBrandsForProvider(provider) {
   return provider === 'claude' ? ['claude', 'chatgpt'] : [];
 }

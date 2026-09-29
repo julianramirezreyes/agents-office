@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { fromSummary, loadConnectors } from '../src/connectors.js';
-import { chatFailureMessage, chatHistoryForRequest, emptyConnectorMessage, escapeHtml, modelBrandsForProvider, officeControls, providerDisplayName, providerUsageStatus, updateOfficeSwitch } from '../src/office-ui.js';
+import { chatFailureMessage, chatHistoryForRequest, emptyConnectorMessage, escapeHtml, modelBrandsForProvider, officeControls, providerDisplayName, providerUsageStatus, requestChatWithThinking, updateOfficeSwitch } from '../src/office-ui.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const shell = fs.readFileSync(path.join(root, 'src/shell.html'), 'utf8');
@@ -83,6 +83,34 @@ test('codexChatHistoryExcludesTheCurrentMessageAndKeepsOnlyRecentUserAndAgentTur
 test('chatFailureMessageNamesTheProviderForEachOffice', () => {
   assert.equal(chatFailureMessage('codex', 'request failed'), 'Codex chat failed: request failed');
   assert.equal(chatFailureMessage('claude', 'request failed'), 'Claude chat failed: request failed');
+});
+
+test('chatRequestRemovesItsThinkingEntryAfterSuccess', async () => {
+  const history = [];
+  const thinking = { who: 'work', requestId: 'req-1', text: 'Agent is thinking' };
+
+  const reply = await requestChatWithThinking(history, thinking, async () => ({ ok: true, async json() { return { reply: 'Ready' }; } }));
+
+  assert.deepEqual(reply, { reply: 'Ready' });
+  assert.deepEqual(history, []);
+});
+
+test('chatRequestRemovesItsThinkingEntryAfterNetworkFailure', async () => {
+  const history = [];
+  const thinking = { who: 'work', requestId: 'req-2', text: 'Agent is thinking' };
+
+  await assert.rejects(requestChatWithThinking(history, thinking, async () => { throw new Error('offline'); }), /offline/);
+
+  assert.deepEqual(history, []);
+});
+
+test('chatRequestRemovesItsThinkingEntryAfterInvalidJson', async () => {
+  const history = [];
+  const thinking = { who: 'work', requestId: 'req-3', text: 'Agent is thinking' };
+
+  await assert.rejects(requestChatWithThinking(history, thinking, async () => ({ ok: true, async json() { throw new SyntaxError('invalid JSON'); } })), /invalid JSON/);
+
+  assert.deepEqual(history, []);
 });
 
 test('office_switchAcceptsTheConfiguredIPv6LoopbackRuntime', async () => {
