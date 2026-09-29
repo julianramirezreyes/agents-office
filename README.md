@@ -315,6 +315,37 @@ documented one; when it does not answer, the gauge shows the office's own count 
 five-hour window instead, and says so on hover. No dollars anywhere: the office runs on the plan
 you already pay for, and the gauge is there to show it.
 
+## Language (EN/ES)
+
+The **ES** button beside CALENDAR switches the whole office — labels, buttons, hints, the task
+feed, server messages — into Spanish; press it again (now **EN**) to switch back. The first time
+you switch, each string on screen is asked of Claude once and the answer is cached to
+`data/i18n/es.json`; every switch after that is instant, cache hits. New text the app renders
+later (a fresh task row, a routine's countdown) is picked up and translated the same way, with no
+extra step. `<html lang>` follows the toggle.
+
+Never translated: anything you or an agent wrote — chat messages, agent deliverables, brain note
+titles and content — plus form values, numbers, times, dates, money and percentages, and a task
+title you typed live yourself. Agent output stays in whatever language you write to it; that is a
+separate, per-agent house-style choice, not this toggle. The toggle only exists with the server
+running (`npm start`); the demo (double-clicking `dist/command-centre-v2.html`) has nowhere to ask
+for a translation, so the button stays hidden there.
+
+Delete `data/i18n/es.json` to reset every cached translation — the next switch to Spanish asks
+Claude again from scratch.
+
+## Real work only
+
+Once the office is running live (`npm start`), a **REAL ONLY** button appears beside the language
+toggle. Off (the default) is today's office: a believable morning of demo tasks, pod-card numbers
+and feed lines animate the office alongside whatever real work you give it. Click it on and the
+page reloads without any of that — no demo tasks, no invented pod-card numbers (shown as **—**
+instead), no fake feed lines or ambient work bubbles, and the Brain shows your real note count
+(0 if your vault is empty) instead of the sample graph. Only real tasks, routines, approvals,
+chats and connectors ever show up; an agent with nothing real to do simply sits idle. The choice
+is remembered (`localStorage`) and only ever shown once the office confirms it is actually live —
+the demo (`dist/command-centre-v2.html` opened as a file) always runs its usual demo.
+
 ## Make it yours
 
 `office.config.json`:

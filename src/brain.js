@@ -10,6 +10,7 @@ import { BRAIN as BRAIN0 } from './braingraph.js';
 import { PROFILE } from './profile.js';
 const BRAIN = (PROFILE && PROFILE.graph && PROFILE.graph.nodes && PROFILE.graph.nodes.length) ? PROFILE.graph : BRAIN0; // INDUSTRY PROFILE: the demo company's own graph
 import { AGENTS } from './data.js';
+import { realOnly } from './real-only.js'; // V3.7: real-only
 
 const GROUP_COL = {
   '40-Marketing': '#E69393', '50-Products': '#98A5EF', '60-Sales': '#EADC8F', '70-Delivery': '#8FD3F4',
@@ -161,14 +162,17 @@ export function initBrain({ scene, brainGroup, getR, esc, hud, toScreen, getCame
   }
   // LIVE: replace the graph with the server's (the user's real vault), keeping today's state
   function setGraph(g) {
-    if (!g || !g.nodes || !g.nodes.length) return;
+    if (!g) return;
+    // V3.7: real-only — an empty real brain is 0 real notes, not the demo graph; outside REAL ONLY,
+    // keep the pretty demo scene rather than going blank when the owner's vault is empty.
+    if ((!g.nodes || !g.nodes.length) && !realOnly()) return;
     const today = new Date().toISOString().slice(0, 10);
-    nodes = g.nodes.map((n, i) => ({ ...n, i, fresh: n.g === 'Agents Office' && n.id.startsWith(today) })); // notes the office wrote today glow green
-    links = g.links.map(([a, b]) => [a, b]);
+    nodes = (g.nodes || []).map((n, i) => ({ ...n, i, fresh: n.g === 'Agents Office' && n.id.startsWith(today) })); // notes the office wrote today glow green
+    links = (g.links || []).map(([a, b]) => [a, b]);
     adj = nodes.map(() => new Set()); for (const [a, b] of links) { adj[a].add(b); adj[b].add(a); }
     byId = new Map(nodes.map(n => [n.id, n.i])); hubs = nodes.slice(0, 8);
     floorPos = new Map((g.floor || []).map(([x, y], i) => [i, { x, y }]));
-    state.notes = g.notes; sel = null;
+    state.notes = g.notes || 0; sel = null;
     etch(); updateStrip();
   }
   // LIVE: an agent read a named note (the server tells us which) — glint it if it is on the floor

@@ -8,13 +8,14 @@
     "start": "node serve.mjs",
     "build": "node build.mjs",
     "check": "node check.mjs",
-    "check:live": "CHECK_LIVE=1 node check.mjs",
+    "check:live": "CHECK_LIVE=1 node check.live.mjs",
     "graph": "node graph-build.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@openai/codex-sdk": "0.157.1",
     "d3-force": "^3.0.0"
   },
   "devDependencies": {
