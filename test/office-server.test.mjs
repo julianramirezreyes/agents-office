@@ -111,6 +111,62 @@ test('serverUsesInjectedFixtureRosterInsteadOfCheckoutLocalRoster', async () => 
   assert.equal(health.agents[0].name, 'FIXTURE AGENT');
 });
 
+test('serverReloadsRosterThroughTheInjectedFixtureLoader', async () => {
+  const paths = fixture();
+  let loads = 0;
+  const { base } = await startRuntime({ ...paths, office: 'claude', port: 0, provider: { id: 'claude' }, runtimeOptions: {
+    rosterLoader: () => {
+      loads++;
+      const agents = defaultRoster();
+      agents.find(agent => agent.id === 'elead').name = loads === 1 ? 'INITIAL FIXTURE LEAD' : 'RELOADED FIXTURE LEAD';
+      return { agents, problems: [], customised: 0, briefed: 0, files: [] };
+    },
+  } });
+
+  // GET /api/skills exercises reloadRoster; it never enters routing or provider execution.
+  const response = await fetch(`${base}/api/skills`);
+  assert.equal(response.status, 200);
+  assert.ok(loads >= 2, 'the read-only skills route reloads through the injected roster seam');
+  const health = await fetch(`${base}/api/health`).then(result => result.json());
+  assert.equal(health.agents.find(agent => agent.id === 'elead').name, 'RELOADED FIXTURE LEAD');
+});
+
+test('storageFailureIsVisibleAndIsolatedToItsOffice', async () => {
+  const claudePaths = fixture(), codexPaths = fixture();
+  fs.writeFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), JSON.stringify([{ id: 'claude-task', title: 'Fixture task' }]));
+  fs.writeFileSync(path.join(codexPaths.dataRoot, 'tasks.json'), JSON.stringify([{ id: 'codex-task', title: 'Fixture task' }]));
+  const claude = await startRuntime({ ...claudePaths, office: 'claude', port: 0, provider: { id: 'claude' } });
+  const codex = await startRuntime({ ...codexPaths, office: 'codex', port: 0, provider: { id: 'codex' } });
+  const originalWrite = fs.writeFileSync;
+  fs.writeFileSync = function (file, ...args) {
+    if (path.resolve(String(file)) === path.join(claudePaths.dataRoot, 'tasks.json')) {
+      const error = new Error('fixture disk is full');
+      error.code = 'ENOSPC';
+      throw error;
+    }
+    return originalWrite.call(this, file, ...args);
+  };
+
+  try {
+    const [failed, succeeded] = await Promise.all([
+      // DELETE is the direct storage branch; unlike POST/run it does not call route()/askX().
+      fetch(`${claude.base}/api/tasks/claude-task`, { method: 'DELETE' }),
+      fetch(`${codex.base}/api/tasks/codex-task`, { method: 'DELETE' }),
+    ]);
+    const failure = await failed.json();
+    assert.equal(failed.status, 500);
+    assert.match(failure.error, /fixture disk is full/);
+    assert.deepEqual(await succeeded.json(), { ok: true });
+    assert.equal(succeeded.status, 200, 'the other office keeps accepting storage changes');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), 'utf8')), [{ id: 'claude-task', title: 'Fixture task' }]);
+    const codexTasks = await fetch(`${codex.base}/api/tasks`).then(result => result.json());
+    assert.deepEqual(codexTasks, []);
+    assert.equal((await fetch(`${codex.base}/api/health`).then(result => result.json())).provider, 'codex');
+  } finally {
+    fs.writeFileSync = originalWrite;
+  }
+});
+
 test('server_shutdownStopsAcceptingWorkAndPersistsTaskState', async () => {
   const paths = fixture();
   fs.writeFileSync(path.join(paths.dataRoot, 'tasks.json'), JSON.stringify([{ id: 'keep', title: 'persist me' }]));

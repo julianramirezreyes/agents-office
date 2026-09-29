@@ -90,7 +90,7 @@ let skills = loadSkills(BRAIN, AGENTS); // reloaded before every task and chat, 
 for (const w of skills.problems) console.warn('skills:', w);
 // the roster's editable fields are re-read too (a brief written by the lead's interview, or by hand, lands without a restart)
 function reloadRoster() {
-  const r = loadRoster(BRAIN, { office: OFFICE });
+  const r = rosterLoader(BRAIN, { office: OFFICE });
   for (const a of r.agents) { const cur = AGENTS.find(x => x.id === a.id); if (cur) Object.assign(cur, { name: a.name, role: a.role, does: a.does, tools: a.tools, brief: a.brief }); }
   if (r.problems.join() !== roster.problems.join()) for (const w of r.problems) console.warn('agents:', w);
   Object.assign(roster, { problems: r.problems, customised: r.customised, briefed: r.briefed, files: r.files });
