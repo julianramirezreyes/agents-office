@@ -1,6 +1,6 @@
 # Migrar `agents-office` a un fork personal
 
-Preparar la migración de `ajsahni/agents-office` al fork público `julianramirezreyes/agents-office`, integrando primero el estado más reciente observado del upstream y las ramas locales en el orden solicitado. Conservar el vínculo `upstream` para futuras sincronizaciones. No se ha hecho `fetch`, `merge`, cambio de remoto ni publicación en esta tarea; no afirmar que hay actualizaciones nuevas hasta verificarlas.
+Preparar la migración de `ajsahni/agents-office` al fork público `julianramirezreyes/agents-office`, integrando primero el estado más reciente observado del upstream y las ramas locales en el orden solicitado. Conservar el vínculo `upstream` para futuras sincronizaciones. FM-01 ya hizo un fetch público y anónimo de heads/tags; no se ejecutaron fusiones ni publicación.
 
 ## Objetivo y problema
 
@@ -20,9 +20,9 @@ Trasladar el trabajo propio al fork personal sin perder la base upstream ni publ
 | Referencia | Estado conocido |
 |---|---|
 | Checkout fuente `/home/julian/proyectos/agents-office` | `feat/live-translation` en `10da3d7`; sucio en `.gitignore`, `dist/command-centre-v2.html`, `package-lock.json`, `src/braingraph.js`; no rastreados `.codegraph/` y `AGENTS.md`. Preservarlos íntegros. |
-| Worktree de esta rama | `feat/dual-offices` en `d7ad60b`, creada exactamente desde `feat/live-translation`. |
-| `main` local | `51f9973`. La referencia cacheada `origin/main` figura dos commits adelante, pero no se ha actualizado por fetch; no confirma el estado remoto actual. |
-| Remoto actual | `origin` apunta a `https://github.com/ajsahni/agents-office.git`. |
+| Worktree de esta rama | `feat/dual-offices` en `e9da6f958cb72ebc93f00cdb0e7b7d7b347b833d`; conserva la base funcional conocida `d7ad60b` y añade solo commits documentales del plan. |
+| `main` local / caché | `main` en `51f9973f411f50c36ab94a01300c6239e8dd49cc`; `origin/main` cacheado en `2d4700189ee0900060a97ff3ab79f9eb0386ca23`. |
+| Remotos | `origin` sigue en `https://github.com/ajsahni/agents-office.git`; `upstream` fue agregado con esa misma URL pública. Ambos quedaron sin cambios posteriores. |
 
 Estos datos son el punto de partida reportado, no sustituyen una nueva lectura del estado antes de actuar.
 
@@ -38,7 +38,7 @@ Estos datos son el punto de partida reportado, no sustituyen una nueva lectura d
 
 ## Tareas estables
 
-- [ ] **FM-01 — Obtener y comparar el upstream**. Verificar el estado de los worktrees y cambios locales; agregar/verificar `upstream` sin alterar el destino de `origin`, hacer fetch anónimo del upstream y registrar las puntas/merge-bases de `main` y `feat/live-translation`. No concluir que existen novedades hasta observar el fetch. Si el checkout sucio vuelve inseguro el siguiente paso, parar sin tocar esos archivos.
+- [x] **FM-01 — Obtener y comparar el upstream**. Verificar el estado de ambos worktrees y cambios locales; agregar/verificar `upstream` sin alterar el destino de `origin`, hacer un fetch anónimo de todas las heads/tags y registrar puntas, divergencias y merge-bases. Evidencia exacta en “Evidencia FM-01”.
 - [ ] **FM-02 — Integrar upstream en `feat/live-translation`**. Incorporar la punta upstream verificada antes de crear el fork, con una operación no destructiva y sin sobrescribir cambios sucios. Revisar conflictos y conservar los cambios locales; detenerse para decisión si no se puede demostrar una resolución segura. Registrar los commits resultantes.
 - [ ] **FM-03 — Fusionar las ramas propias en el orden solicitado**. Fusionar `feat/dual-offices` en `feat/live-translation` y, después de verificar el resultado, fusionar `feat/live-translation` en `main`. Mantener los worktrees y el checkout fuente en estados identificables; no hacer reset para forzar una fusión.
 - [ ] **FM-04 — Crear y configurar el fork personal**. Crear o verificar el fork público autorizado `julianramirezreyes/agents-office`; configurar `origin` hacia el fork y `upstream` hacia `ajsahni/agents-office`. Confirmar URLs y relación de fork antes de publicar. No hacer PR ni push al upstream.
@@ -47,7 +47,8 @@ Estos datos son el punto de partida reportado, no sustituyen una nueva lectura d
 ## Criterios de aceptación
 
 - [ ] No se pierde ni modifica silenciosamente ningún cambio local preexistente; cualquier bloqueo por archivos sucios queda registrado y se detiene sin limpieza destructiva.
-- [ ] Se consulta upstream antes de crear el fork, y los cambios remotos incluidos se basan en referencias obtenidas por fetch durante la ejecución.
+- [x] Se consultó upstream antes de crear el fork; el fetch observó dos commits upstream no contenidos en `main` local. No hay commits upstream nuevos respecto de `origin/main` cacheado.
+- [ ] Se integran los cambios remotos solo desde las referencias verificadas.
 - [ ] Las fusiones se completan en este orden: upstream a `feat/live-translation`, `feat/dual-offices` a `feat/live-translation`, y `feat/live-translation` a `main`.
 - [ ] `origin` apunta al fork personal y `upstream` al repo original; el fork es público y conserva su relación upstream.
 - [ ] Solo ramas propias se publican al fork; no hay PR ni push al upstream original.
@@ -62,7 +63,13 @@ Ejecutar y registrar la salida observada en cada paso; las comprobaciones locale
 git status --short --branch
 git worktree list --porcelain
 git remote -v
-git fetch upstream
+# Ejecutar solo con configuración aislada, sin credenciales/helpers/askpass/headers:
+env -i PATH=/usr/bin:/bin HOME=/nonexistent LC_ALL=C \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+  GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false GIT_OPTIONAL_LOCKS=0 \
+  GCM_INTERACTIVE=Never git -c credential.helper= -c core.askPass=/bin/false \
+  -c http.extraHeader= -c http.https://github.com/.extraHeader= fetch upstream \
+  'refs/heads/*:refs/remotes/upstream/*' 'refs/tags/*:refs/tags/*'
 git log --graph --oneline --decorate --left-right main...upstream/main
 git merge-base main upstream/main
 git diff --check
@@ -78,12 +85,22 @@ Ruta ODD: **delegated direct** para la migración operativa, por requerir varias
 
 ## Progreso y evidencia
 
-- **Estado:** plan registrado; ninguna fusión, fetch, configuración remota, fork ni publicación realizada como parte de este documento.
+- **Estado:** FM-01 completada; `upstream` agregado y fetch anónimo exitoso. Ninguna fusión, fork ni publicación ejecutada.
 - **Documento local:** `odd/tasks/fork-migration.md`.
-- **Comprobaciones de preparación:** estado leído en el worktree `/home/julian/proyectos/agents-office-worktrees/dual-offices`; está en `feat/dual-offices` (`d7ad60b`) y su único elemento no rastreado observado fue `.codegraph/`.
+- **Comprobaciones de preparación:** ambas worktrees identificadas; estado fuente y objetivo se capturó antes y después del fetch (`GIT_OPTIONAL_LOCKS=0`). El checkout fuente se mantuvo en `feat/live-translation` (`10da3d7d99b7659dc0539b5898ba20633eb2582a`) con `.gitignore`, `dist/command-centre-v2.html`, `package-lock.json`, `src/braingraph.js` modificados y `.codegraph/`, `AGENTS.md` no rastreados. El worktree de tarea se mantuvo en `feat/dual-offices` (`e9da6f958cb72ebc93f00cdb0e7b7d7b347b833d`) con `.codegraph/` no rastreado.
+
+## Evidencia FM-01
+
+- **Autorización aplicada:** una sola lectura/fetch anónimo al upstream público `https://github.com/ajsahni/agents-office.git`; no se usó `gh`, cuenta GitHub, proveedor ni credencial. Antes del fetch, la configuración local no tenía claves `http.*.extraheader`, `credential.*` ni `url.*.insteadOf`. No se imprimieron valores de credenciales.
+- **Aislamiento del fetch:** `env -i`, HOME inexistente, configuración system/global deshabilitada, prompts/askpass/helpers y `http.extraHeader` deshabilitados. Se solicitaron todas las refs `refs/heads/*` y `refs/tags/*`. Exit 0, sin retry. Se recibió solo la head pública `main`; se actualizaron 18 tags. `origin` no se alteró.
+- **Puntas observadas:** local `main` `51f9973f411f50c36ab94a01300c6239e8dd49cc`; `feat/live-translation` `10da3d7d99b7659dc0539b5898ba20633eb2582a`; `feat/dual-offices` `e9da6f958cb72ebc93f00cdb0e7b7d7b347b833d`; `origin/main` cacheado `2d4700189ee0900060a97ff3ab79f9eb0386ca23`; `upstream/main` recién obtenido `2d4700189ee0900060a97ff3ab79f9eb0386ca23`.
+- **Divergencia** (`upstream/main...<ref>`; primero commits solo upstream, luego solo en rama local): `main` `2 / 0`; `feat/live-translation` `2 / 14`; `feat/dual-offices` `2 / 69`. Merge-base de upstream/main con las tres refs: `51f9973f411f50c36ab94a01300c6239e8dd49cc`.
+- **Upstream contra caché:** `origin/main...upstream/main` `0 / 0`; son la misma punta. No aparecieron commits nuevos desde `origin/main` cacheado. Los dos commits de upstream que faltan a `main` local son `a915a509df633f066e953ac7f73d867929de746a` (“Add view-image-mcp: fetch any public image URL as base64 vision block”) y `2d4700189ee0900060a97ff3ab79f9eb0386ca23` (“Merge pull request #9 from T3g-ceo/claude/nifty-mcclintock-18fbb3”).
+- **Efecto local:** status del checkout fuente idéntico antes/después; los archivos sucios no fueron editados. Solo se añadió el remoto local `upstream`; `origin` permanece igual. No hubo merge/rebase/reset/stash/checkout ni publicación.
+- **Resultado:** FM-01 completa; FM-02 no iniciada. Dado que el checkout fuente continúa sucio, antes de integrar upstream hay que diseñar una protección no destructiva que mantenga esos cambios de usuario intactos; detenerse si eso requiere mover/guardar/commitear cambios o si no puede garantizarse.
 - **TDD/verificación del producto:** pendiente para la ejecución de integración; modo estricto del proyecto indicado como habilitado, runner `node --test test/*.test.mjs`.
 - **Commit de introducción del documento:** `3bd37ada89eed0b5aad3604ddc3d00e6df4b5ba3` (`docs: plan personal fork migration`).
 
 ## Siguiente paso
 
-Comenzar FM-01 desde un estado nuevamente verificado. El checkout fuente sigue teniendo cambios de usuario sin confirmar; preservar esos archivos exactamente y solicitar una decisión si bloquean una operación segura. No anunciar actualizaciones del upstream hasta completar el fetch y comparar sus referencias.
+Comenzar FM-02 desde las refs verificadas, sin crear el fork todavía. Resolver primero cómo trabajar sin afectar el checkout fuente sucio; pedir decisión si no hay una vía demostrablemente segura. El upstream coincide con `origin/main` cacheado, pero `main` local está dos commits detrás.
