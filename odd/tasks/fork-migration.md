@@ -1,6 +1,6 @@
 # Migrar `agents-office` a un fork personal
 
-Preparar la migración de `ajsahni/agents-office` al fork público `julianramirezreyes/agents-office`, integrando primero el estado más reciente observado del upstream y las ramas locales en el orden solicitado. Conservar el vínculo `upstream` para futuras sincronizaciones. FM-01 verificó las refs con fetch anónimo y FM-04 creó/verificó el fork; FM-02/03a integraron upstream y `feat/dual-offices` en `feat/live-translation`, y FM-03b integró esa rama en `main` local. Aún no se han publicado ramas ni abierto PR.
+Migrar el trabajo local de `ajsahni/agents-office` al fork público `julianramirezreyes/agents-office`, integrando primero la punta upstream observada y las ramas propias en el orden solicitado. Conservar el vínculo `upstream` para sincronizaciones futuras. FM-01 verificó las refs con fetch anónimo y FM-04 creó/verificó el fork; FM-02/03a integraron upstream y `feat/dual-offices` en `feat/live-translation`, FM-03b integró esa rama en `main` local y FM-05 publicó las tres ramas propias autorizadas al fork. No se abrió PR ni se publicó al repositorio original.
 
 ## Objetivo y problema
 
@@ -10,7 +10,7 @@ Trasladar el trabajo propio al fork personal sin perder la base upstream ni publ
 
 - Upstream original: `https://github.com/ajsahni/agents-office.git`.
 - Fork público autorizado: `julianramirezreyes/agents-office`; cuenta verificada por el orquestador.
-- Se autoriza fetch anónimo del upstream, crear/verificar el fork, configurar los remotos, integrar las ramas y publicar ramas propias al fork.
+- Se autoriza fetch anónimo del upstream, crear/verificar el fork, configurar los remotos, integrar las ramas y publicar ramas propias al fork. El usuario confirmó publicar el historial tal cual, incluyendo el commit de respaldo de los cuatro archivos rastreados; la aceptación de privacidad se registra sin exponer una dirección de correo personal.
 - No crear PR ni hacer push al repositorio original.
 - El commit de respaldo `02c01187fd5f95a96fb013644d9440524d949b96` de exactamente cuatro rutas rastreadas fue autorizado y completado antes de esta integración. No editar, mover ni limpiar `.codegraph/` ni `AGENTS.md`; el watcher puede auto-sincronizar el índice CodeGraph. Registrar cualquier cambio observado y no restaurarlo ni borrarlo manualmente.
 - No hacer reset, checkout destructivo, limpieza ni stash. Si impiden una operación segura, parar y pedir resolución; nunca descartarlos.
@@ -43,8 +43,8 @@ Estos datos son el punto de partida reportado, no sustituyen una nueva lectura d
 - [x] **FM-02 — Integrar upstream en `feat/live-translation`**. La rama fuente tiene su contenido rastreado limpio tras el commit de respaldo. Fusionar la punta verificada `upstream/main` en `feat/live-translation`, sin alterar los no rastreados del checkout fuente. Registrar OIDs, conflictos y resolución; detenerse ante cualquier riesgo de pérdida. Evidencia en “Evidencia FM-02/FM-03a”.
 - [x] **FM-03a — Fusionar `feat/dual-offices` en `feat/live-translation`**. Después de FM-02, integrar la rama funcional con el plan documental; mantener y verificar íntegros los no rastreados del checkout fuente. No descartar contenido en conflictos. La diferencia generada de `dist/command-centre-v2.html` se resolvió regenerando el artefacto desde el árbol combinado en un proyecto temporal con brain sintético inexistente; evidencia en “Evidencia FM-02/FM-03a”.
 - [x] **FM-03b — Fusionar `feat/live-translation` en `main`**. Solo tras verificar FM-02 y FM-03a; conservar historial y registrar commit de fusión. No hacer reset para forzar la fusión. Evidencia en “Evidencia FM-03b”.
-- [x] **FM-04 — Crear y configurar el fork personal**. Fork público creado y verificado para `julianramirezreyes/agents-office`; `origin` apunta al fork, `upstream` al repo original y el push a upstream está deshabilitado. Evidencia en “Evidencia FM-04”. No se han publicado ramas.
-- [ ] **FM-05 — Publicar las ramas propias y comprobar sincronización futura**. Publicar únicamente las ramas aprobadas al fork personal; comprobar que las ramas remotas tienen las puntas esperadas y documentar el flujo futuro: fetch de `upstream`, comparación/revisión y fusión explícita de actualizaciones. No afirmar que ese flujo fue probado hasta observarlo.
+- [x] **FM-04 — Crear y configurar el fork personal**. Fork público creado y verificado para `julianramirezreyes/agents-office`; `origin` apunta al fork, `upstream` al repo original y el push a upstream está deshabilitado. Evidencia en “Evidencia FM-04”.
+- [x] **FM-05 — Publicar las ramas propias y documentar la sincronización futura**. Tras confirmación del usuario para publicar el historial tal cual, publicar solo `main`, `feat/live-translation` y `feat/dual-offices` al fork; verificar los OIDs remotos vía API y dejar explícito el flujo de fetch→comparar→merge explícito para futuras actualizaciones. No abrir PR ni publicar al original. Evidencia en “Evidencia FM-05”.
 
 ## Criterios de aceptación
 
@@ -53,9 +53,9 @@ Estos datos son el punto de partida reportado, no sustituyen una nueva lectura d
 - [x] Se integró upstream solo desde la punta verificada `upstream/main` `2d4700189ee0900060a97ff3ab79f9eb0386ca23`.
 - [x] Las fusiones se completaron en este orden: upstream a `feat/live-translation`, `feat/dual-offices` a `feat/live-translation`, y `feat/live-translation` a `main`; OIDs y padres registrados en evidencia FM-02/FM-03a/FM-03b.
 - [x] `origin` apunta al fork personal y `upstream` al repo original; el fork es público y conserva su relación upstream.
-- [ ] Solo ramas propias se publican al fork; no hay PR ni push al upstream original.
+- [x] Solo las tres ramas propias autorizadas se publicaron al fork; no hay PR ni push al upstream original.
 - [x] Las puntas finales, commits de fusión y cualquier conflicto/resolución están anotados y verificables.
-- [ ] El flujo futuro para traer upstream está explicado y evita mezclarlo automáticamente o sobrescribir trabajo local.
+- [x] El flujo futuro para traer upstream está explicado y requiere comparación/revisión seguida de merge explícito; no usa pull automático ni sobrescribe trabajo local.
 
 ## Verificación aplicable
 
@@ -87,7 +87,7 @@ Ruta ODD: **delegated direct** para la migración operativa, por requerir operac
 
 ## Progreso y evidencia
 
-- **Estado:** FM-01, FM-02, FM-03a, FM-03b y FM-04 completas; FM-05 pendiente. No se han publicado ramas ni creado PR.
+- **Estado:** FM-01 a FM-05 completas. Las tres ramas autorizadas están publicadas en el fork; no hay PR ni push al upstream original.
 - **Documento local:** `odd/tasks/fork-migration.md`.
 - **Comprobaciones de preparación:** checkout fuente `/home/julian/proyectos/agents-office` verificado en `feat/live-translation` (`02c01187fd5f95a96fb013644d9440524d949b96`), sin cambios rastreados; solo `.codegraph/` y `AGENTS.md` aparecen como no rastreados. Worktree documental actual verificado en `feat/dual-offices` (`7ed7878c11b1f39f17156221dfa269a68c3bc283`), con `.codegraph/` no rastreado.
 - **Respaldo local autorizado:** `02c01187fd5f95a96fb013644d9440524d949b96` (`chore: preserve local migration state`), contiene exactamente `.gitignore`, `dist/command-centre-v2.html`, `package-lock.json`, `src/braingraph.js`. SHA256 pre/post del commit iguales; el contenido exportado de `BRAIN` fue verificado idéntico a HEAD; solo cambió el comentario de fecha.
@@ -126,10 +126,18 @@ Ruta ODD: **delegated direct** para la migración operativa, por requerir operac
 - **Fork:** `https://github.com/julianramirezreyes/agents-office`, creado con `gh repo fork`; cuenta verificada `julianramirezreyes`.
 - **Verificación REST:** `fork=true`, `parent=ajsahni/agents-office`, `private=false`, rama predeterminada `main`.
 - **Remotos locales:** `origin` tiene fetch y push hacia el fork personal; `upstream` tiene fetch hacia `https://github.com/ajsahni/agents-office.git` y push deshabilitado (`NO_PUSH_TO_UPSTREAM`). `remote.pushDefault=origin`.
-- **Límites:** no se hizo push de ramas, PR ni merge. El checkout fuente de `feat/live-translation` conserva sin cambio sus archivos sucios previos.
+- **Límites:** no se modificó el checkout fuente de `feat/live-translation`; su respaldo rastreado y archivos locales no rastreados se conservaron según evidencias anteriores.
+
+## Evidencia FM-05
+
+- **Autorización:** el usuario confirmó publicar el historial tal cual. La publicación se limitó al fork personal público `julianramirezreyes/agents-office`; no se abrió PR ni se hizo push al upstream original. La aceptación de privacidad se registró sin mostrar el correo personal exacto.
+- **Push:** el orquestador confirmó que el push atómico, exclusivo al `origin` del fork, terminó con exit 0. Esta unidad documental no repitió push ni hizo llamadas remotas.
+- **Puntas verificadas por API (evidencia del orquestador):** `main` `139d6d826a0b5b248197c3a97e134cf3650e31f3`; `feat/live-translation` `240c28c6501961ec936e14a48fbd8e3fc40e36e3`; `feat/dual-offices` `9a68f12275e80eb203b4d186d2c5b28da914fbf9`. Cada ref remota coincide con la punta local esperada reportada.
+- **Seguridad de destino:** el remoto `upstream` conserva el push URL deshabilitado `NO_PUSH_TO_UPSTREAM`; `remote.pushDefault=origin`. No se creó PR.
+- **Sincronización futura:** ejecutar un `git fetch upstream` explícito (anónimo, con configuración de credenciales aislada conforme a FM-01); comparar `upstream/main` con la rama objetivo mediante merge-base y `git log --left-right`/`git diff`; revisar los commits y conflictos; solo entonces hacer un merge explícito de la punta revisada en la rama seleccionada. No usar `git pull` automático: fetch y decisión de integración permanecen separados. Proteger antes cualquier cambio local y detenerse si la integración puede sobrescribirlo. Este flujo es el procedimiento documentado, no una sincronización futura ya probada.
 
 ## Siguiente paso y bloqueo
 
-FM-02, FM-03a y FM-03b terminaron siguiendo el orden acordado; `main` local quedó en `19f12c7234498bb598c662fc5d4b6792913318e4` dentro del worktree aislado. FM-05 (publicación al fork) permanece pendiente; no se hizo push de ramas ni se creó PR. El detalle de hashes runtime variables dentro de `.codegraph/` está en “Evidencia FM-02/FM-03a”; el índice se conservó sin restauración ni borrado.
+FM-01 a FM-05 quedaron completadas. La migración está publicada en las tres ramas del fork; el usuario no solicitó PR y no se hizo push al upstream original. En futuras actualizaciones, seguir el procedimiento explícito de FM-05. El detalle de hashes runtime variables dentro de `.codegraph/` está en “Evidencia FM-02/FM-03a”; el índice se conservó sin restauración ni borrado.
 
-El estado inicial y la comparación de caché se mantienen en la evidencia FM-01; el `main` local actual ya incluye la punta de upstream y la rama `feat/live-translation`, sin publicar nada.
+El `main` final contiene la punta upstream incorporada y el historial de `feat/live-translation`; los OIDs de las tres ramas publicadas se registran en “Evidencia FM-05”.
