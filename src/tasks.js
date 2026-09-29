@@ -27,6 +27,7 @@ import { parseWhen, describe, nextRun, fromPicker, untilText } from './when.js';
 import { initCalendar } from './calendar.js'; // V3.2.1 (16 Sep 2026): the calendar on P
 import { MODEL_KEYS, MODELS, DEFAULT_MODEL, modelName, normModel, FROM_TEXT , EFFORT_KEYS, EFFORT_NAME, normEffort, effortName, effortFor } from './models.js';
 import { readRealOnly, shouldSeedDemo, realOnly, setRealOnlyActive } from './real-only.js'; // V3.7: real-only
+import { escapeHtml, officeControls, providerDisplayName, updateOfficeSwitch } from './office-ui.js';
 
 const SEGMENTS = ['roofing', 'HVAC', 'dental', 'logistics', 'fitness', 'property', 'landscaping', 'legal'];
 
@@ -308,6 +309,9 @@ export function initTasks(ctx) {
     model: panel.querySelector('.tp-model'), effort: panel.querySelector('.tp-effort'),
     bigBtn: panel.querySelector('.tp-big-btn'), team: panel.querySelector('.tp-team'),
   };
+  const officeSwitchLink = document.getElementById('officeSwitch');
+  const officeSwitchStatus = document.getElementById('officeSwitchStatus');
+  if (served) { P_.model.hidden = true; P_.effort.hidden = true; }
   // V3.7: the box grows with the text (one line at rest, six at most) and the big editor mirrors it
   const big = document.getElementById('tpBig');
   const B_ = { in: big.querySelector('.tb-in'), dept: big.querySelector('.tb-dept'), dot: big.querySelector('.tb-head .dot'), hint: big.querySelector('.tb-hint'), add: big.querySelector('.tb-add'), close: big.querySelector('.tb-close') };
@@ -316,15 +320,23 @@ export function initTasks(ctx) {
   function closeBig() { if (!big.classList.contains('on')) return; big.classList.remove('on'); grow(); if (P_.input.value) P_.input.focus(); }
   function mirrorHint() { B_.hint.innerHTML = P_.hint.innerHTML; B_.hint.className = P_.hint.className.replace('tp-hint', 'tp-hint tb-hint'); }
   // V3.6 (D2): the model menu — Sonnet · Opus · Fable. Shows the office default; change it and it applies to this task (or this routine, with REPEAT on)
+  let officeProvider = 'claude', officeModels = MODEL_KEYS.slice();
+  const runtimeName = () => providerDisplayName(officeProvider);
   let officeModel = DEFAULT_MODEL, modelTouched = false;
   P_.model.innerHTML = MODEL_KEYS.map(k => `<option value="${k}">${MODELS[k].name.toUpperCase()}</option>`).join('');
   P_.model.value = officeModel;
   P_.model.addEventListener('change', () => { modelTouched = P_.model.value !== officeModel; P_.model.classList.toggle('set', modelTouched); updateHint(); });
   P_.model.addEventListener('keydown', e => e.stopPropagation());
-  function setOfficeModel(k) { officeModel = normModel(k) || DEFAULT_MODEL; if (!modelTouched) P_.model.value = officeModel; }
+  const displayModel = key => officeProvider === 'codex' ? (key || 'Codex runtime') : modelName(key);
+  function setOfficeModel(k) {
+    officeModel = officeProvider === 'codex'
+      ? (typeof k === 'string' && officeModels.includes(k) ? k : '')
+      : (normModel(k) || DEFAULT_MODEL);
+    if (!modelTouched) P_.model.value = officeModel;
+  }
   const chosenModel = () => (modelTouched ? P_.model.value : null);
   function resetModel() { modelTouched = false; P_.model.value = officeModel; P_.model.classList.remove('set'); resetEffort(); }
-  const modelBit = t => t.modelUsed ? ` · ${modelName(t.modelUsed)}${t.effortUsed ? ' ' + t.effortUsed : ''}${t.modelFrom && t.modelFrom !== 'office' ? ' (' + FROM_TEXT[t.modelFrom] + ')' : ''}` : '';
+  const modelBit = t => t.modelUsed ? ` · ${escapeHtml(displayModel(t.modelUsed))}${t.effortUsed && officeProvider === 'claude' ? ' ' + t.effortUsed : ''}${t.modelFrom && t.modelFrom !== 'office' ? ' (' + FROM_TEXT[t.modelFrom] + ')' : ''}` : '';
   // V3.6.1: the EFFORT menu beside the model — AUTO (the model's own; Opus = high) · Low · Medium · High · Extra high · Max. Same precedence as the model.
   let officeEffort = '', effortTouched = false;
   P_.effort.innerHTML = `<option value="">AUTO</option>` + EFFORT_KEYS.map(k => `<option value="${k}">${EFFORT_NAME[k].toUpperCase()}</option>`).join('');
@@ -335,9 +347,9 @@ export function initTasks(ctx) {
   const chosenEffort = () => (effortTouched ? (P_.effort.value || 'auto') : null); // 'auto' = the owner chose the model's own over the office's
   const effortSend = () => { const e = chosenEffort(); return e && e !== 'auto' ? e : undefined; };
   function resetEffort() { effortTouched = false; P_.effort.value = officeEffort; P_.effort.classList.remove('set'); }
-  const effortUsedFor = (mdl) => effortFor({ task: effortSend(), office: chosenEffort() === 'auto' ? '' : officeEffort, model: mdl }); // what a demo card will show
+  const effortUsedFor = (mdl) => officeProvider === 'claude' ? effortFor({ task: effortSend(), office: chosenEffort() === 'auto' ? '' : officeEffort, model: mdl }) : { effort: null, from: 'runtime' }; // Codex owns effort policy unless it reports controls
   const pickBit = (forWhat) => { // the hint's "Opus · High for this task"
-    const bits = []; if (modelTouched) bits.push(modelName(P_.model.value)); if (effortTouched) bits.push(effortName(P_.effort.value || ''));
+    const bits = []; if (modelTouched) bits.push(escapeHtml(displayModel(P_.model.value))); if (effortTouched && officeProvider === 'claude') bits.push(effortName(P_.effort.value || ''));
     return bits.length ? ` · <b>${bits.join(' · ')}</b> for this ${forWhat}` : '';
   };
   // the REPEAT picker (B1): cadence + time; "needs my OK" defaults on (D1)
@@ -391,7 +403,7 @@ export function initTasks(ctx) {
       const { agent: ra } = route(dept, rt.text || text);
       const need = rt.needsDay ? 'which day? say "every Monday …"' : rt.needsTime ? 'what time? add "at 8am"' : null;
       P_.hint.innerHTML = `<span class="tp-av" style="border-color:${DEPTS[ra.dept].chip};background:${DEPTS[ra.dept].chip}55">⏱</span>Routine · <b>${esc(describe(rt.when) || 'every week')}</b>` +
-        (need ? ` · <span class="tp-amber">${need}</span>` : live ? ' · Claude names the agent when you press Add' : ` · goes to <b>${ra.name}</b>`) + (rt.guessed ? ` · "${esc(rt.guessWord)}" taken as ${rt.when.at}` : '');
+        (need ? ` · <span class="tp-amber">${need}</span>` : live ? ` · ${runtimeName()} names the agent when you press Add` : ` · goes to <b>${ra.name}</b>`) + (rt.guessed ? ` · "${esc(rt.guessWord)}" taken as ${rt.when.at}` : '');
       P_.hint.innerHTML += pickBit('routine');
       P_.hint.className = 'tp-hint on'; return;
     }
@@ -404,7 +416,7 @@ export function initTasks(ctx) {
     const busy = agentTasks(a.id, 'doing').length > 0 || R[a.id].state === 'stuck';
     const chip = DEPTS[a.dept].chip;
     P_.hint.innerHTML = `<span class="tp-av" style="border-color:${chip};background:${chip}55">${a.name[0]}</span>` +
-      (live ? `Probably <b>${a.name}</b> · Claude confirms when you press Add`
+      (live ? `Probably <b>${a.name}</b> · ${runtimeName()} confirms when you press Add`
             : `Goes to <b>${a.name}</b> · ${busy ? 'starts after their current job' : 'starts straight away'}${matched ? '' : ' · say more and I’ll pick a specialist'}`) +
       pickBit('task');
     P_.hint.className = 'tp-hint on';
@@ -436,7 +448,7 @@ export function initTasks(ctx) {
       const text = title, k = dept;
       P_.input.value = ''; P_.input.disabled = true; P_.add.disabled = true;
       const team = asTeam(text);
-      say(team ? `Routing through Claude — <b>${leadOf(k).name}</b> is reading it for the team…` : `Routing through Claude — ${DEPTS[k].name.toLowerCase()} is reading it…`, 'busy');
+      say(team ? `Routing through ${runtimeName()} — <b>${leadOf(k).name}</b> is reading it for the team…` : `Routing through ${runtimeName()} — ${DEPTS[k].name.toLowerCase()} is reading it…`, 'busy');
       try {
         const mdl = chosenModel();
         const r = await fetch(API + '/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dept: k, text, model: mdl || undefined, effort: effortSend(), team: team || undefined }) });
@@ -449,8 +461,8 @@ export function initTasks(ctx) {
         say(st.team ? `Added — <b>${agentOf(t.agent).name}</b> has it and is splitting it across the team` : `Added — <b>${agentOf(t.agent).name}</b> has it${st.why ? ' · ' + esc(st.why) : ''}`);
         setTimeout(() => { if (!P_.input.value) P_.hint.classList.remove('on'); }, 7000);
       } catch (e) {
-        say(`Claude couldn't take it (${esc(e.message)}). Kept it on the board.`, 'err');
-        const { agent: a } = route(k, text); addTask(a.id, text, 'you');
+        P_.input.value = text;
+        say(`${runtimeName()} couldn't take it (${esc(e.message)}). No task was added; your text is still here to retry.`, 'err');
       }
       P_.input.disabled = false; P_.add.disabled = false; P_.input.blur(); // hand the keys back to the office
       return;
@@ -492,7 +504,7 @@ export function initTasks(ctx) {
     if (!text) { say('What should happen? The sentence has a time but no task.', 'err'); return; }
     if (live) {
       P_.input.disabled = true; P_.add.disabled = true;
-      say('Setting the routine — Claude is naming the agent…', 'busy');
+      say(`Setting the routine — ${runtimeName()} is naming the agent…`, 'busy');
       try {
         const r = await fetch(API + '/routines', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dept: k, text, when: rt.when, needsOk: rt.picker ? P_.okc.checked : undefined, model: chosenModel() || undefined, effort: effortSend() }) });
         const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
@@ -501,7 +513,7 @@ export function initTasks(ctx) {
         say(`Routine set — <b>${a.name}</b> · ${esc(j.routine.desc)} · next ${esc(untilText(j.routine.nextAt))}${j.routine.needsOk ? ' · waits for your OK' : ' · read-only, no OK needed'}${j.guessed ? ` · "${esc(j.guessed)}" taken as ${j.routine.when.at}` : ''}`);
         P_.input.value = ''; resetModel(); spawnEmote(R[a.id], '⏱'); feedPush(R[a.id], '⏱', `New routine: ${j.routine.title} (${j.routine.desc})`);
         filter = 'sched'; render(true); poll();
-      } catch (e) { say(`Claude couldn't set it (${esc(e.message)}).`, 'err'); }
+      } catch (e) { say(`${runtimeName()} couldn't set it (${esc(e.message)}).`, 'err'); }
       P_.input.disabled = false; P_.add.disabled = false; P_.input.blur();
       return;
     }
@@ -555,7 +567,7 @@ export function initTasks(ctx) {
     const n = nextOf(mine);
     el.className = 'mrt' + (railExp ? ' exp' : '');
     el.innerHTML = `<div class="mrt-h"><span>⏱ ${mine.length} routine${mine.length > 1 ? 's' : ''}${n ? ' · next <b>' + esc(untilText(n.nextAt)) + '</b>' : ' · all paused'}</span><span class="car">▸</span></div>
-      <div class="mrt-l">${mine.map(r => `<div class="mrt-r" data-rid="${r.id}"><span>${esc(r.title)}</span><small>${esc(r.desc)} · ${modelName(r.model || officeModel)} · ${r.paused ? 'paused' : 'next ' + esc(untilText(r.nextAt))} · ${r.needsOk ? 'waits for your OK' : 'read-only'}</small>
+      <div class="mrt-l">${mine.map(r => `<div class="mrt-r" data-rid="${r.id}"><span>${esc(r.title)}</span><small>${esc(r.desc)} · ${escapeHtml(displayModel(r.model || officeModel))} · ${r.paused ? 'paused' : 'next ' + esc(untilText(r.nextAt))} · ${r.needsOk ? 'waits for your OK' : 'read-only'}</small>
         <div class="tp-act"><button class="run" data-act="run">RUN NOW</button><button data-act="${r.paused ? 'resume' : 'pause'}">${r.paused ? 'RESUME' : 'PAUSE'}</button><button data-act="delete">DELETE</button></div></div>`).join('')}</div>`;
     el.querySelector('.mrt-h').addEventListener('click', () => { railExp = !railExp; el.classList.toggle('exp', railExp); });
     el.querySelectorAll('.tp-act button').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); rtAct(b.closest('[data-rid]').dataset.rid, b.dataset.act); }));
@@ -563,7 +575,7 @@ export function initTasks(ctx) {
   /* ---------- V3.5 live: the page keeps up with a server that runs things on its own ---------- */
   let pollN = 0, usageDue = true;
   async function pollUsage(force) { // V3.6: the plan's gauge — every 30 s, and after every run
-    try { const u = await fetch(API + '/usage' + (force ? '?refresh=1' : '')).then(r => r.json()); if (onUsage) onUsage(u); } catch {}
+    try { const u = await fetch(API + '/usage' + (force ? '?refresh=1' : '')).then(r => r.json()); if (onUsage) onUsage({ ...u, provider: officeProvider }); } catch {}
   }
   async function poll() {
     if (!live || polling) return; polling = true;
@@ -683,11 +695,27 @@ export function initTasks(ctx) {
     try {
       const h = await (await fetch(API + '/health')).json();
       if (!h.ok) { setRealOnlyActive(false); maybeSeedMorning(false); if (onDemoFallback) onDemoFallback(); return; } // V3.7: real-only — not actually live, fall back to demo
-      live = true; setOfficeModel(h.model); setOfficeEffort(h.effort);
+      live = true;
+      const ui = officeControls(h);
+      officeProvider = ui.provider; officeModels = ui.models;
+      calendarModelKeys.splice(0, calendarModelKeys.length, ...(officeProvider === 'claude' ? MODEL_KEYS : []));
+      if (officeProvider === 'codex') P_.model.innerHTML = ui.models.map(model => `<option value="${esc(model)}">${esc(model)}</option>`).join('');
+      P_.model.hidden = !ui.showModel;
+      P_.effort.hidden = !ui.showEffort;
+      P_.team.hidden = !ui.showTeams;
+      setOfficeModel(h.model); setOfficeEffort(h.effort);
+      if (officeSwitchLink && officeSwitchStatus) updateOfficeSwitch({ office: h.office, launcherUrl: h.launcherUrl, link: officeSwitchLink, status: officeSwitchStatus });
       setRealOnlyActive(realOnlyFlag); maybeSeedMorning(true); // V3.7: real-only — confirmed live, lock in the boot-time guess
-      if (h.teams) { teamsCfg = { enabled: h.teams.enabled !== false, max: h.teams.max || 4 }; P_.team.hidden = !teamsCfg.enabled; }
+      if (h.teams) teamsCfg = { enabled: ui.showTeams, max: h.teams.max || 4 };
       const mode = panel.querySelector('.tp-mode');
-      if (mode) { mode.hidden = false; mode.textContent = 'LIVE · ' + (h.backend === 'anthropic-sdk' ? 'CLAUDE API' : 'CLAUDE'); mode.classList.add('live'); mode.title = `${h.name} · ${h.backend} · ${modelName(h.model)} by default · brain: ${h.brain}`; }
+      if (mode) {
+        mode.hidden = false;
+        mode.textContent = `LIVE · ${officeProvider.toUpperCase()}${h.backend === 'anthropic-sdk' ? ' API' : ''}`;
+        const limitation = h.capabilities?.reason || (Array.isArray(h.capabilities?.limitations) ? h.capabilities.limitations.join('; ') : '');
+        mode.title = `${h.name} · ${h.backend}${h.model ? ` · ${displayModel(h.model)} by default` : ''}${h.brain ? ` · brain: ${h.brain}` : ''}${limitation ? ` · ${limitation}` : ''}`;
+        if (limitation) mode.textContent += ` · ${limitation}`;
+        mode.classList.add('live');
+      }
       if (brain) { try { brain.setGraph(await (await fetch(API + '/brain')).json()); } catch {} }
       const list = await (await fetch(API + '/tasks')).json();
       for (const st of list) {
@@ -735,7 +763,7 @@ export function initTasks(ctx) {
         const w = now - t.addedAt;
         return `${who} · ${w < 60000 ? 'just added' : 'waiting ' + span(w)} · ${src}${teamBit(t)}${modelBit(t)}`;
       }
-      case 'doing': return `${who}${t.live ? (t.approved === undefined && t.draftAt ? ' · sending with Claude' : t.team?.members?.length ? ' · leading the team with Claude' : ' · working with Claude') : t.agent === 'vid' ? ' · rendering' : t.teamHold ? ' · waiting on the pieces' : ''}${t.routine ? ' · routine' : ''}${teamBit(t)}${modelBit(t)}`;
+      case 'doing': return `${who}${t.live ? (t.approved === undefined && t.draftAt ? ` · sending with ${runtimeName()}` : t.team?.members?.length ? ` · leading the team with ${runtimeName()}` : ` · working with ${runtimeName()}`) : t.agent === 'vid' ? ' · rendering' : t.teamHold ? ' · waiting on the pieces' : ''}${t.routine ? ' · routine' : ''}${teamBit(t)}${modelBit(t)}`;
       case 'waiting': return `<span class="tp-amber">waiting ${span(now - t.changedAt)} for your tick</span> · ${who}${t.routine ? ' · routine draft' : ''}${teamBit(t)}${modelBit(t)}`;
       case 'scheduled': return `${who} · runs ${esc(untilText(t.dueAt))} · ${new Date(t.dueAt).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${timeStr(t.dueAt)}${t.needsOk ? ' · waits for your OK' : ''}${teamBit(t)}${modelBit(t)}`;
       case 'done': return `${who} · done ${timeStr(t.doneAt)}${t.approved ? (t.live ? ' · sent after your OK' : ' · approved') : ''}${t.late ? ' · <span class="tp-late">ran late</span>' : ''}${teamBit(t)}${modelBit(t)}${t.live ? (t.error ? ' · <span class="tp-amber">failed</span>' : ' · <span class="tp-res">result ready →</span>') : ''}`;
@@ -754,7 +782,7 @@ export function initTasks(ctx) {
     const a = agentOf(r.agent);
     return `<div class="tp-row sched${r.paused ? ' paused' : ''}" data-id="r:${r.id}" data-rid="${r.id}" data-dept="${r.dept}" data-agent="${r.agent}">
       <span class="tp-st sched">⏱</span>
-      <div class="tp-body"><div class="tp-t">${esc(r.title)}</div><div class="tp-m">${esc(r.desc)} · ${a.name} · ${modelName(r.model || officeModel)}${r.needsOk ? ' · waits for your OK' : ' · read-only'}${r.lastAt ? ' · last ' + timeStr(r.lastAt) + (r.lastLate ? ' <span class="tp-late">late</span>' : '') : ''}</div>
+      <div class="tp-body"><div class="tp-t">${esc(r.title)}</div><div class="tp-m">${esc(r.desc)} · ${a.name} · ${escapeHtml(displayModel(r.model || officeModel))}${r.needsOk ? ' · waits for your OK' : ' · read-only'}${r.lastAt ? ' · last ' + timeStr(r.lastAt) + (r.lastLate ? ' <span class="tp-late">late</span>' : '') : ''}</div>
       <div class="tp-act"><button class="run" data-act="run">RUN NOW</button><button data-act="${r.paused ? 'resume' : 'pause'}">${r.paused ? 'RESUME' : 'PAUSE'}</button><button data-act="delete">DELETE</button></div></div>
       <span class="tp-ago" data-rago="${r.id}">${r.paused ? 'PAUSED' : esc(untilText(r.nextAt))}</span></div>`;
   }
@@ -841,7 +869,7 @@ export function initTasks(ctx) {
     const pct = Math.round(t.progress * 100);
     const av = `<span class="tk-av" style="border-color:${chip};background:${chip}55">${a.name[0]}</span>`;
     let meta;
-    if (t.state === 'done') meta = `<span class="tk-tick">✓</span><span>${a.name}</span><span class="tk-pct">${t.approved ? 'APPROVED · ' : ''}${t.modelUsed ? modelName(t.modelUsed).toUpperCase() + ' · ' : ''}${timeStr(t.doneAt)}</span>`;
+    if (t.state === 'done') meta = `<span class="tk-tick">✓</span><span>${a.name}</span><span class="tk-pct">${t.approved ? 'APPROVED · ' : ''}${t.modelUsed ? escapeHtml(displayModel(t.modelUsed).toUpperCase()) + ' · ' : ''}${timeStr(t.doneAt)}</span>`;
     else if (t.state === 'waiting') meta = `${av}<span>${a.name}</span><span class="tk-chip">WAITING ${span(Date.now() - t.changedAt).toUpperCase()}</span>`;
     else if (t.state === 'doing') meta = `${av}<span>${a.name}</span><span class="tk-pct" data-pct="${t.id}">${t.agent === 'vid' ? 'RENDER · ' : ''}${pct}%</span>`;
     else if (t.state === 'scheduled') meta = `${av}<span>${a.name}</span><span class="tk-pct">${esc(untilText(t.dueAt).toUpperCase())}</span>`;
@@ -860,7 +888,7 @@ export function initTasks(ctx) {
   function cardHTMLr(r) { // C1: a SCHEDULED card on the company board
     const a = agentOf(r.agent), chip = DEPTS[r.dept].chip;
     return `<div class="tk sched${r.paused ? ' paused' : ''}" data-rid="${r.id}" data-dept="${r.dept}"><div class="tk-t">⏱ ${esc(r.title)}</div>
-      <div class="tk-m"><span class="tk-av" style="border-color:${chip};background:${chip}55">${a.name[0]}</span><span>${a.name} · ${modelName(r.model || officeModel).toUpperCase()}</span><span class="tk-pct">${r.paused ? 'PAUSED' : esc(untilText(r.nextAt).toUpperCase())}</span></div></div>`;
+      <div class="tk-m"><span class="tk-av" style="border-color:${chip};background:${chip}55">${a.name[0]}</span><span>${a.name} · ${escapeHtml(displayModel(r.model || officeModel).toUpperCase())}</span><span class="tk-pct">${r.paused ? 'PAUSED' : esc(untilText(r.nextAt).toUpperCase())}</span></div></div>`;
   }
   const COLS = [['sched', 'SCHEDULED'], ['next', 'BACKLOG'], ['doing', 'IN PROGRESS'], ['waiting', 'WAITING ON APPROVAL'], ['done', 'DONE']];
   function companyHTML() {
@@ -1034,7 +1062,8 @@ export function initTasks(ctx) {
     tasks.splice(tasks.indexOf(t), 1); dirty = true; feedPush(R[t.agent], '✕', `Cancelled: ${t.title}`);
     return true;
   }
-  const calendar = initCalendar({ tasks, routines, agentOf, DEPTS, DEPT_KEYS, RT_DEPTS, rtRefuse, create: createScheduled, createRoutine: createRoutineAt, cancelTask: cancelScheduled, rtAct, openAgent: (id, tab) => openAgent && openAgent(id, tab), esc, isLive: () => live, officeModel: () => officeModel, MODEL_KEYS, modelName, business: () => document.title.replace(/ — Agents Office$/, ''), currentDept: () => dept });
+  const calendarModelKeys = MODEL_KEYS.slice();
+  const calendar = initCalendar({ tasks, routines, agentOf, DEPTS, DEPT_KEYS, RT_DEPTS, rtRefuse, create: createScheduled, createRoutine: createRoutineAt, cancelTask: cancelScheduled, rtAct, openAgent: (id, tab) => openAgent && openAgent(id, tab), esc, isLive: () => live, officeModel: () => officeModel, MODEL_KEYS: calendarModelKeys, modelName: displayModel, provider: () => officeProvider, business: () => document.title.replace(/ — Agents Office$/, ''), currentDept: () => dept });
   return { tick, toggle, open, close, openFor, isOpen, boardWidth, onFocusChange, onStuck, onResolve, calendar, createScheduled, cancelScheduled,
            handleChat, addTask, revise, rowHTML, setDept, tasks, panelWidth: () => panel.offsetWidth, isLive: () => live,
            routines, addRoutine, rtAct, railFor, syncPills, refresh: poll, resolveLive, pendingReject, rejectLive, officeModel: () => officeModel, chosenModel, chosenEffort };

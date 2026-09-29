@@ -43,17 +43,20 @@ export function fromSummary(m, agents) {
   const agentTools = agents ? Object.fromEntries(agents.map(a => [a.id, (a.tools || []).map(t => {
     const n = norm(t); const hit = (m.servers || []).find(s => s.key === n || norm(s.name) === n || s.id === t); return hit ? (hit.key || hit.id) : n;
   })])) : null;
-  return { live: true, byDept, logos, status, shared, names, off, agentTools, servers: m.servers || [], tools: !!m.tools, web: !!m.web };
+  return { live: true, provider: m.provider, byDept, logos, status, shared, names, off, agentTools, servers: m.servers || [], tools: !!m.tools, web: !!m.web };
 }
 
-export async function loadConnectors({ timeout = 25000 } = {}) {
+export async function loadConnectors({ timeout = 25000, fetcher = fetch } = {}) {
   if (!location.protocol.startsWith('http')) return null;
   try {
     const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeout);
-    const [m, a] = await Promise.all([fetch('/api/mcp', { signal: ctl.signal }).then(r => r.ok ? r.json() : null),
-                                      fetch('/api/agents', { signal: ctl.signal }).then(r => r.ok ? r.json() : null).catch(() => null)]);
+    const [m, a, h] = await Promise.all([fetcher('/api/mcp', { signal: ctl.signal }).then(r => r.ok ? r.json() : null),
+                                         fetcher('/api/agents', { signal: ctl.signal }).then(r => r.ok ? r.json() : null).catch(() => null),
+                                         fetcher('/api/health', { signal: ctl.signal }).then(r => r.ok ? r.json() : null).catch(() => null)]);
     clearTimeout(t);
-    if (!m) return null;
-    return fromSummary(m, a && a.agents);
+    const healthProvider = ['claude', 'codex'].includes(h?.provider) && h.office === h.provider ? h.provider : null;
+    const provider = healthProvider || (['claude', 'codex'].includes(m?.provider) ? m.provider : null);
+    if (!m && !provider) return null;
+    return fromSummary({ ...(m || {}), provider, servers: m?.servers || [] }, a && a.agents);
   } catch { return null; }
 }

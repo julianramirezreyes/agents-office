@@ -1,0 +1,148 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { loadConfig } from '../config.mjs';
+import { resolveOfficePaths, validateOfficePair } from '../office-paths.mjs';
+
+const temporary = fn => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-office-paths-'));
+  try { return fn(directory); }
+  finally { fs.rmSync(directory, { recursive: true, force: true }); }
+};
+
+const isolatedEnv = values => ({ ...values });
+
+test('loadConfig_withoutOffice_keepsClaudeDefaults', () => temporary(root => {
+  const config = loadConfig({ office: 'claude', env: {}, root });
+  assert.equal(config.port, 4520);
+  assert.equal(config.brain, './brain');
+  assert.equal(config.brainPath, path.join(root, 'brain'));
+}));
+
+test('loadConfig_withExplicitFixtureRootAcceptsClaudePortEnvironment', () => temporary(root => {
+  assert.equal(loadConfig({ office: 'claude', env: { AO_CLAUDE_PORT: '4610' }, root }).port, 4610);
+}));
+
+test('loadConfig_codexDoesNotInheritClaudeProviderDefaults', () => temporary(root => {
+  fs.writeFileSync(path.join(root, 'office.config.json'), JSON.stringify({ port: 4520, brain: './brain', model: 'sonnet' }));
+  const claude = loadConfig({ office: 'claude', env: {}, root });
+  const codex = loadConfig({ office: 'codex', env: {}, root });
+  assert.equal(codex.port, 4521);
+  assert.equal(codex.brainPath, path.join(root, 'brain-codex'));
+  assert.equal(codex.model, '');
+  assert.equal(codex.configPath, path.join(root, 'office.config.codex.local.json'));
+  assert.equal(codex.dataRoot, path.join(root, 'data-codex'));
+  assert.equal(validateOfficePair(claude, codex, 4519).ok, true);
+}));
+
+test('loadConfig_codexLocalPortOverrideParticipatesInEffectiveCollisionValidation', () => temporary(root => {
+  fs.writeFileSync(path.join(root, 'office.config.codex.local.json'), JSON.stringify({ port: 4520, brain: './brain-codex' }));
+  const claude = loadConfig({ office: 'claude', env: {}, root });
+  const codex = loadConfig({ office: 'codex', env: {}, root });
+  assert.equal(codex.port, 4520);
+  assert.equal(validateOfficePair(claude, codex, 4519).ok, false);
+}));
+
+test('loadConfig_codexInvalidEnvironmentPortRemainsInvalidForValidation', () => temporary(root => {
+  const claude = loadConfig({ office: 'claude', env: {}, root });
+  const codex = loadConfig({ office: 'codex', env: { AO_CODEX_PORT: 'not-a-port' }, root });
+  assert.equal(Number.isNaN(codex.port), true);
+  const validation = validateOfficePair(claude, codex, 4519);
+  assert.equal(validation.ok, false);
+  assert.match(validation.errors.join(' '), /codex port must be an integer/i);
+}));
+
+test('loadConfig_codexDoesNotInheritClaudeCapabilities', () => temporary(root => {
+  const claudeCapabilities = {
+    mcp: { allow: ['claude.ai Gmail'], deny: ['example'], departments: { gmail: ['emails'] } },
+    tools: { web: true, browser: true }, teams: { enabled: true, max: 4 },
+  };
+  fs.writeFileSync(path.join(root, 'office.config.json'), JSON.stringify(claudeCapabilities));
+  fs.writeFileSync(path.join(root, 'office.config.codex.local.json'), JSON.stringify(claudeCapabilities));
+  const claude = loadConfig({ office: 'claude', env: {}, root });
+  const codex = loadConfig({ office: 'codex', env: {}, root });
+  assert.deepEqual(claude.mcp.allow, ['claude.ai Gmail']);
+  assert.equal(claude.tools.browser, true);
+  assert.equal(claude.teams.enabled, true);
+  assert.deepEqual(codex.mcp, { allow: [], deny: [], departments: {} });
+  assert.deepEqual(codex.tools, { web: false, browser: false });
+  assert.deepEqual(codex.teams, { enabled: false, max: 0 });
+}));
+
+test('resolveOfficePaths_usesSeparateCodexWritableRoots', () => temporary(root => {
+  const claude = resolveOfficePaths({ office: 'claude', env: isolatedEnv({}), root });
+  const codex = resolveOfficePaths({ office: 'codex', env: isolatedEnv({}), root });
+  assert.deepEqual(claude, {
+    office: 'claude', port: 4520,
+    configPath: path.join(root, 'office.config.local.json'),
+    dataRoot: path.join(root, 'data'), brainPath: path.join(root, 'brain'), codexHome: undefined,
+  });
+  assert.deepEqual(codex, {
+    office: 'codex', port: 4521,
+    configPath: path.join(root, 'office.config.codex.local.json'),
+    dataRoot: path.join(root, 'data-codex'), brainPath: path.join(root, 'brain-codex'), codexHome: undefined,
+  });
+  assert.equal(validateOfficePair(claude, codex, 4519).ok, true);
+}));
+
+test('resolveOfficePaths_honorsPerOfficeConfigDataAndBrainOverrides', () => temporary(root => {
+  const paths = resolveOfficePaths({ office: 'codex', root, env: isolatedEnv({
+    AO_CODEX_CONFIG: './custom/codex.json', AO_CODEX_DATA: './state/codex', AO_CODEX_BRAIN: './notes/codex', AO_CODEX_PORT: '4801',
+  }) });
+  assert.equal(paths.configPath, path.join(root, 'custom/codex.json'));
+  assert.equal(paths.dataRoot, path.join(root, 'state/codex'));
+  assert.equal(paths.brainPath, path.join(root, 'notes/codex'));
+  assert.equal(paths.port, 4801);
+}));
+
+test('validateOfficePair_rejectsCanonicalPathAliases', () => temporary(root => {
+  const shared = path.join(root, 'shared');
+  const alias = path.join(root, 'alias');
+  fs.mkdirSync(shared);
+  fs.symlinkSync(shared, alias, 'dir');
+  const claude = resolveOfficePaths({ office: 'claude', root, env: isolatedEnv({ AO_CLAUDE_DATA: './alias' }) });
+  const codex = resolveOfficePaths({ office: 'codex', root, env: isolatedEnv({ AO_CODEX_DATA: './shared' }) });
+  const result = validateOfficePair(claude, codex, 4519);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /data/i);
+}));
+
+test('validateOfficePair_rejectsDuplicatePorts', () => temporary(root => {
+  const claude = resolveOfficePaths({ office: 'claude', root, env: isolatedEnv({ AO_CLAUDE_PORT: '4600' }) });
+  const codex = resolveOfficePaths({ office: 'codex', root, env: isolatedEnv({ AO_CODEX_PORT: '4600' }) });
+  const result = validateOfficePair(claude, codex, 4601);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /port/i);
+}));
+
+test('validateOfficePair_doesNotTouchExistingClaudeFiles', () => temporary(root => {
+  const configPath = path.join(root, 'office.config.local.json');
+  const dataFile = path.join(root, 'data', 'tasks.json');
+  const brainNote = path.join(root, 'brain', 'sentinel.md');
+  for (const [file, content] of [[configPath, '{"sentinel":"config"}'], [dataFile, '[{"sentinel":"data"}]'], [brainNote, 'existing brain']]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  }
+  const before = [configPath, dataFile, brainNote].map(file => ({ file, content: fs.readFileSync(file), stat: fs.statSync(file) }));
+  const claude = resolveOfficePaths({ office: 'claude', root, env: isolatedEnv({}) });
+  const codex = resolveOfficePaths({ office: 'codex', root, env: isolatedEnv({}) });
+  assert.equal(validateOfficePair(claude, codex, 4519).ok, true);
+  for (const { file, content, stat } of before) {
+    assert.deepEqual(fs.readFileSync(file), content);
+    const after = fs.statSync(file);
+    assert.equal(after.ino, stat.ino);
+    assert.equal(after.size, stat.size);
+    assert.equal(after.mtimeMs, stat.mtimeMs);
+  }
+  assert.equal(fs.existsSync(path.join(root, 'office.config.codex.local.json')), false);
+  assert.equal(fs.existsSync(path.join(root, 'data-codex')), false);
+  assert.equal(fs.existsSync(path.join(root, 'brain-codex')), false);
+}));
+
+test('resolveOfficePaths_inheritsExplicitCodexHomeOnlyForCodex', () => temporary(root => {
+  const env = isolatedEnv({ CODEX_HOME: './codex-home' });
+  assert.equal(resolveOfficePaths({ office: 'codex', root, env }).codexHome, path.join(root, 'codex-home'));
+  assert.equal(resolveOfficePaths({ office: 'claude', root, env }).codexHome, undefined);
+}));

@@ -267,6 +267,15 @@
   #topReal.on { background: var(--ink); color: var(--cream); border-color: var(--ink); } /* filled = on */
   body.dark #topReal { background: #1B1C21; }
   body.dark #topReal.on { background: var(--ink); color: var(--cream); }
+  #officeSwitch {
+    display: inline-flex; align-items: center; flex-shrink: 0; margin-right: 8px;
+    border: 1px solid var(--hairline); border-radius: 99px; padding: 5px 10px;
+    color: var(--ink); background: color-mix(in srgb, var(--cream) 94%, transparent);
+    font: 700 10px var(--ui); letter-spacing: .08em; text-decoration: none; white-space: nowrap;
+  }
+  #officeSwitch:hover { background: var(--ink); color: var(--cream); }
+  #officeSwitch[hidden], #officeSwitchStatus:empty { display: none; }
+  #officeSwitchStatus { flex-shrink: 0; max-width: 220px; overflow: hidden; color: var(--grey); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
   #topAppr {
     align-items: center; gap: 5px; cursor: pointer; flex-shrink: 0; /* V3.7: never squeezed by the connector strip */
     font-size: 12px; font-weight: 600; letter-spacing: .06em;
@@ -1091,6 +1100,8 @@
   <div id="topconn"></div>
   <span class="sp"></span>
   <div id="topmodels"></div>
+  <a id="officeSwitch" hidden href="#" aria-label="Switch office" title="Switch office">Switch office / Cambiar de oficina</a>
+  <span id="officeSwitchStatus" role="status" aria-live="polite"></span>
   <button id="topCal" title="the calendar — tasks and routines on their days (P)">◷ CALENDAR</button>
   <button id="topLang" hidden title="Switch the office to Spanish">ES</button>
   <button id="topReal" hidden title="Show only real work — no demo tasks or numbers">REAL ONLY</button>

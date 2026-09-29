@@ -38,6 +38,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { loadConfig, ROOT } from './config.mjs';
 import { layoutGraph, readVault, readOfficeNotes } from './graph-build.mjs';
@@ -53,12 +54,25 @@ import * as teams from './teams.mjs';
 import { normModel, modelFor, modelArgs, modelId, modelName, MODEL_KEYS, DEFAULT_MODEL, normEffort, effortFor, effortName, EFFORT_KEYS } from './src/models.js';
 import { parseWhen, describe, valid as validWhen, untilText } from './src/when.js';
 import { createTranslator, isSupportedLang } from './translate.mjs'; // V3.7: live UI translation (EN/ES)
+import { createCodexProvider } from './codex-provider.mjs';
 
-const cfg = loadConfig();
+export async function createOfficeRuntime({ officeConfig, provider, dataRoot, brainPath, usageFetch, discoverMcp, taskRunner, rosterLoader = loadRoster } = {}) {
+const cfg = officeConfig || loadConfig();
+const OFFICE = cfg.office || 'claude';
+const PROVIDER = (typeof provider === 'string' ? provider : provider?.id) || cfg.provider || OFFICE;
+const LAUNCHER_URL = process.env.AO_LAUNCHER_URL || null;
+const codexProvider = PROVIDER === 'codex'
+  ? (typeof provider?.runTask === 'function' ? provider : createCodexProvider({
+    sdk: provider?.sdk,
+    codexHome: provider?.codexHome || process.env.CODEX_HOME,
+    workspaceRoot: cfg.workspaceRoot || ROOT,
+    policy: provider?.policy || cfg.codexPolicy,
+  }))
+  : null;
 const HTML = path.join(ROOT, 'dist', 'command-centre-v2.html'); // built by build.mjs; shipped so npm start works without a build
-const DATA = path.join(ROOT, 'data');
+const DATA = path.resolve(dataRoot || cfg.dataRoot || path.join(ROOT, 'data'));
 const FILE = path.join(DATA, 'tasks.json');
-const BRAIN = cfg.brainPath;
+const BRAIN = path.resolve(brainPath || cfg.brainPath);
 const NOTES_DIR = path.join(BRAIN, 'Agents Office');
 const CLI_CWD = path.join(os.tmpdir(), 'agents-office-cli'); // an empty cwd: no CLAUDE.md, no repo context
 const version = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { return '?'; } })();
@@ -66,15 +80,17 @@ const RUN_TIMEOUT = Math.max(60, +cfg.timeout || 300) * 1000; // agents with too
 { const m = normModel(cfg.model); if (cfg.model && !m) console.warn(`config: model must be sonnet, opus or fable (got "${cfg.model}") — using ${DEFAULT_MODEL}`); cfg.model = m || DEFAULT_MODEL; } // V3.6: three models, by name
 { const e = normEffort(cfg.effort); if (cfg.effort && !e) console.warn(`config: effort must be low, medium, high, xhigh or max (got "${cfg.effort}") — using the model's own`); cfg.effort = e || ''; } // V3.6.1: the office's effort, empty = the model's own
 mcp.configure(cfg);
-const TEAMS = teams.settings(cfg); // V3.2 (16 Sep): { enabled, max }
-const roster = loadRoster(BRAIN);
+const emptyMcpSummary = () => ({ discoveredAt: 0, web: false, browser: { on: false, installed: false, device: '', onboarded: false }, servers: [] });
+const mcpSummary = () => PROVIDER === 'claude' ? mcp.summary() : emptyMcpSummary();
+const TEAMS = PROVIDER === 'claude' ? teams.settings(cfg) : { enabled: false, max: 0 }; // Teams are Claude-specific until Codex reports its own support.
+const roster = rosterLoader(BRAIN, { office: OFFICE });
 const AGENTS = roster.agents; // id · department · lead · name · role · does · tools · brief
 for (const w of roster.problems) console.warn('agents:', w);
 let skills = loadSkills(BRAIN, AGENTS); // reloaded before every task and chat, so a new skill needs no restart
 for (const w of skills.problems) console.warn('skills:', w);
 // the roster's editable fields are re-read too (a brief written by the lead's interview, or by hand, lands without a restart)
 function reloadRoster() {
-  const r = loadRoster(BRAIN);
+  const r = rosterLoader(BRAIN, { office: OFFICE });
   for (const a of r.agents) { const cur = AGENTS.find(x => x.id === a.id); if (cur) Object.assign(cur, { name: a.name, role: a.role, does: a.does, tools: a.tools, brief: a.brief }); }
   if (r.problems.join() !== roster.problems.join()) for (const w of r.problems) console.warn('agents:', w);
   Object.assign(roster, { problems: r.problems, customised: r.customised, briefed: r.briefed, files: r.files });
@@ -84,7 +100,7 @@ const leadOf = dept => AGENTS.find(a => a.department === dept && a.lead) || AGEN
 const setupMap = () => Object.fromEntries(DEPT_KEYS.map(k => [k, onboard.isSetUp(AGENTS, skills, k)]));
 
 let backend = 'claude-cli', sdk = null;
-if (process.env.ANTHROPIC_API_KEY) {
+if (PROVIDER === 'claude' && !provider && process.env.ANTHROPIC_API_KEY) {
   try {
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
     sdk = new Anthropic(); backend = 'anthropic-sdk';
@@ -99,8 +115,9 @@ const nid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const USTATE = usage.loadState(DATA);
 let usageCache = { at: 0, value: null, stale: true };
 async function getUsage(force) {
+  if (PROVIDER !== 'claude') return { ok: false, source: PROVIDER, reason: `Usage is not available for provider "${PROVIDER}"` };
   if (!force && !usageCache.stale && usageCache.value && Date.now() - usageCache.at < 60000) return usageCache.value;
-  const u = await usage.fetchUsage();
+  const u = await (usageFetch || usage.fetchUsage)();
   const v = u.ok ? { ...u, office: usage.fallback(USTATE).window } : { ...usage.fallback(USTATE), reason: u.reason };
   usageCache = { at: Date.now(), value: v, stale: false };
   return v;
@@ -120,6 +137,7 @@ function ranOn(mu, want) {
   return keys.find(k => k.includes(fam)) || keys.filter(k => !/haiku/.test(k)).sort((a, b) => (mu[b].outputTokens || 0) - (mu[a].outputTokens || 0))[0] || keys[0];
 }
 async function askX(system, user, { maxTokens = 4000, tools = true, timeout = RUN_TIMEOUT, model = cfg.model, effort = null } = {}) { // model: sonnet · opus · fable · effort: low…max or null = the model's own (src/models.js)
+  if (PROVIDER !== 'claude') throw new Error(`Provider "${PROVIDER}" is not available in this server runtime`);
   if (sdk) {
     const res = await sdk.messages.create({ model: modelId(model), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] });
     if (res.stop_reason === 'refusal') throw new Error('Claude declined this request');
@@ -213,6 +231,10 @@ function agentBrief(a) {
 const toolKeys = names => [...new Set(names.map(n => /^mcp__/.test(n) ? mcp.keyOf(n) : n === 'WebSearch' || n === 'WebFetch' ? 'web' : null).filter(Boolean))];
 async function route(dept, text) {
   const d = DEPTS[dept]; refreshSkills();
+  if (PROVIDER !== 'claude') {
+    const agent = leadOf(dept);
+    return { agent: agent.id, title: String(text).trim().slice(0, 90), plan: [], eta: 15, why: 'Assigned to the department lead; provider routing is not available', needsOk: routines.guessNeedsOk(text) };
+  }
   const system = `You are the router for ${cfg.name}, a business whose departments are run by AI agents. ` +
     'Pick the single best agent for the owner\'s request — an agent whose skills match the request is the right one — and return ONLY a JSON object — no prose, no code fences.';
   const user = `Department: ${d.name}\nAgents (id · name · role · what they do):\n${rosterText(dept)}\n\nOwner's request: "${text}"\n\n` +
@@ -230,7 +252,7 @@ function agentSystem(a, index, read, { extra = '', words = 260 } = {}) {
     'Write the finished deliverable itself, not a description of what you would do. Plain text: a short heading, then short sections or bullets. ' +
     `At most ${words} words unless a skill or the owner\'s instructions set a different shape — those win. No preamble, no sign-off. Ground it in the company notes below; where a fact is missing, make a reasonable assumption and mark it (assumed). ` +
     'If you used a tool, say so in one line at the end ("Used: Gmail — searched the client thread").\n\n' +
-    `${mcp.promptText(a.tools)}\n\nCOMPANY NOTES\n${businessContext(index)}\n\nNOTES YOU READ FOR THIS TASK\n${contextText(index, read)}`;
+    `${PROVIDER === 'claude' ? mcp.promptText(a.tools) : 'No external tools are configured or confirmed for this provider.'}\n\nCOMPANY NOTES\n${businessContext(index)}\n\nNOTES YOU READ FOR THIS TASK\n${contextText(index, read)}`;
 }
 const modeLineFor = (mode, task) => mode === 'draft' ? '\nPrepare everything, but send, post, pay or change NOTHING outside this machine: the owner reads this first and approves it. End with one line saying exactly what will go out when approved (or that nothing needs to).'
   : mode === 'approve' ? `\nThe owner has APPROVED the draft below. Carry out the outbound step now, exactly as drafted, with your tools (send, post, update). If a tool you need is not connected, say so and show what you would have sent. Then report in one short section: what went out, to whom, and anything that did not.\nApproved draft:\n${task.draft || task.result}` : '';
@@ -258,6 +280,20 @@ async function run(task, feedback, mode) { // mode: undefined (a task from the b
   const user = `Task: ${task.title}\nOwner's request: ${task.text}` + (task.plan?.length ? `\nAgreed plan: ${task.plan.join(' → ')}` : '') + routineLine + modeLine +
     (feedback && mode !== 'approve' ? `\n\nThe owner reviewed your previous version and asked for changes: "${feedback}"\nPrevious version:\n${task.result}` : '');
   const { pick, eff } = pickFor(task, a);
+  if (codexProvider && !taskRunner) {
+    const out = await codexProvider.runTask({
+      taskId: task.id,
+      prompt: `${system}\n\n${user}`,
+      cwd: task.cwd || cfg.workspaceRoot || ROOT,
+      model: task.model || undefined,
+      approvalPolicy: task.approvalPolicy,
+    });
+    return {
+      result: out.text || (out.error ? `Codex task ${out.status}: ${out.error}` : ''),
+      read, tools: [], used: [], skills: skills.names(a), threadId: out.threadId, usage: out.usage,
+      providerStatus: out.status, error: out.error || null,
+    };
+  }
   const { text, tools, modelId: ran } = await askX(system, user, { model: pick.model, effort: eff.effort });
   if (!text) throw new Error('Claude returned nothing');
   return { result: text, read, tools: toolKeys(tools), used: mcp.namesOf(tools), skills: skills.names(a), modelUsed: pick.model, modelFrom: pick.from, modelId: ran, effortUsed: eff.effort || '', effortFrom: eff.from };
@@ -356,7 +392,13 @@ const routinesOut = () => { const list = loadRoutines(); return { routines: list
 const agentName = id => AGENTS.find(a => a.id === id)?.name || id;
 // routine-driven runs go one at a time, so a burst of catch-ups after a long sleep does not spawn five Claude processes at once
 let queue = Promise.resolve();
-const enqueue = fn => { const p = queue.then(fn, fn); queue = p.catch(() => {}); return p; };
+const activeWork = new Set();
+function trackWork(promise) {
+  activeWork.add(promise);
+  promise.then(() => activeWork.delete(promise), () => activeWork.delete(promise));
+  return promise;
+}
+const enqueue = fn => { const p = trackWork(queue.then(fn, fn)); queue = p.catch(() => {}); return p; };
 function fire(r, { due = Date.now(), late = false, by = 'routine' } = {}) { // the routine becomes a task and runs here, page or no page
   const task = { id: nid(), dept: r.dept, agent: r.agent, title: r.title, text: r.text, plan: r.plan || [], eta: 15, why: '', state: 'next', addedAt: Date.now(), by, routine: r.id, when: r.desc || describe(r.when), needsOk: r.needsOk, due, late, routineModel: r.model || undefined, routineEffort: r.effort || undefined, team: r.team && TEAMS.enabled ? { lead: r.agent, asked: 'routine' } : undefined };
   const list = load(); list.push(task); save(list);
@@ -365,15 +407,22 @@ function fire(r, { due = Date.now(), late = false, by = 'routine' } = {}) { // t
   enqueue(() => runServerTask(task.id));
   return task;
 }
-async function runServerTask(id, { feedback, approve } = {}) {
+function runServerTask(id, options = {}) { return runServerTaskWork(id, options); }
+async function runServerTaskWork(id, { feedback, approve } = {}) {
   let list = load(); const task = list.find(t => t.id === id); if (!task) return null;
   task.state = 'doing'; task.startedAt = Date.now(); delete task.ask; save(list);
   try {
-    const out = await run(task, feedback, approve ? 'approve' : task.needsOk ? 'draft' : 'routine');
-    if (approve) { task.result = (task.draft || task.result) + '\n\n---\nAFTER YOUR OK\n' + out.result; task.approved = true; task.approvedAt = Date.now(); }
-    else task.result = out.result;
-    Object.assign(task, { read: out.read, tools: [...new Set([...(task.tools || []), ...out.tools])], used: [...new Set([...(task.used || []), ...out.used])], skills: out.skills, error: false, modelUsed: out.modelUsed, modelFrom: out.modelFrom, modelId: out.modelId, effortUsed: out.effortUsed, effortFrom: out.effortFrom, ...(out.team ? { team: out.team } : {}) });
-    if (task.needsOk && !approve) { task.state = 'waiting'; task.draft = out.result; task.waitingAt = Date.now(); task.ask = routines.askLine(task); }
+    const out = await (taskRunner || run)(task, feedback, approve ? 'approve' : task.needsOk ? 'draft' : 'routine');
+    const providerDidNotComplete = Boolean(out.providerStatus && out.providerStatus !== 'completed');
+    const approvalSucceeded = approve && !out.error && !providerDidNotComplete;
+    if (approvalSucceeded) { task.result = (task.draft || task.result) + '\n\n---\nAFTER YOUR OK\n' + out.result; task.approved = true; task.approvedAt = Date.now(); }
+    else {
+      task.result = out.result;
+      if (approve) { task.approved = false; delete task.approvedAt; }
+    }
+    Object.assign(task, { read: out.read, tools: [...new Set([...(task.tools || []), ...(out.tools || [])])], used: [...new Set([...(task.used || []), ...(out.used || [])])], skills: out.skills, error: !!out.error, threadId: out.threadId, usage: out.usage, providerStatus: out.providerStatus, modelUsed: out.modelUsed, modelFrom: out.modelFrom, modelId: out.modelId, effortUsed: out.effortUsed, effortFrom: out.effortFrom, ...(out.team ? { team: out.team } : {}) });
+    if (out.error || providerDidNotComplete) { task.state = 'done'; task.doneAt = Date.now(); }
+    else if (task.needsOk && !approve) { task.state = 'waiting'; task.draft = out.result; task.waitingAt = Date.now(); task.ask = routines.askLine(task); }
     else { task.state = 'done'; task.doneAt = Date.now(); task.note = writeNote(task); await rebuildGraph(); }
   } catch (e) {
     Object.assign(task, { state: 'done', doneAt: Date.now(), result: 'Could not complete this task: ' + e.message, error: true });
@@ -450,26 +499,39 @@ async function routinesChat(a, text) {
 
 /* ---------- http ---------- */
 const json = (res, code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
-const body = req => new Promise((resolve, reject) => { let s = ''; req.on('data', d => { s += d; }); req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch (e) { reject(e); } }); });
+const body = req => new Promise((resolve, reject) => { let s = ''; req.on('data', d => { s += d; }); req.on('end', () => { try { const parsed = s ? JSON.parse(s) : {}; if (Object.hasOwn(parsed, 'office')) return reject(Object.assign(new Error('office identity is fixed by this server process'), { statusCode: 400 })); resolve(parsed); } catch (e) { reject(e); } }); });
 
-await rebuildGraph();
-const discovering = mcp.discover().then(l => { console.log(`  connectors: ${l.filter(s => s.status === 'connected').length} connected of ${l.length} (claude mcp list)`); return l; });
-const agentsOut = () => { const setup = setupMap(); return AGENTS.map(a => ({ id: a.id, name: a.name, role: a.role, does: a.does, tools: a.tools, brief: a.brief || '', model: a.model || '', effort: a.effort || '', skills: skills.names(a), lessons: learn.count(BRAIN, a.id), department: a.department, lead: a.lead,
+let discovering = Promise.resolve([]);
+const agentsOut = () => { const setup = setupMap(); return AGENTS.map(a => ({ id: a.id, name: a.name, role: a.role, does: a.does, tools: PROVIDER === 'claude' ? a.tools : [], brief: a.brief || '', model: PROVIDER === 'claude' ? a.model || '' : '', effort: PROVIDER === 'claude' ? a.effort || '' : '', skills: skills.names(a), lessons: learn.count(BRAIN, a.id), department: a.department, lead: a.lead,
   interviewer: leadOf(a.department).id === a.id, setUp: setup[a.department] })); };
+let closing = false;
+let routineTimer = null;
 const server = http.createServer(async (req, res) => {
+  if (closing) return json(res, 503, { error: 'office server is shutting down' });
   const url = new URL(req.url, 'http://x');
+  if (url.searchParams.has('office')) return json(res, 400, { error: 'office identity is fixed by this server process' });
   try {
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/command-centre-v2.html' || url.pathname === '/dark')) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       const page = fs.readFileSync(HTML, 'utf8');
       return res.end(url.pathname === '/dark' ? page.replace('<body>', '<body class="dark">') : page); // /dark: the same file, opened in dark mode
     }
-    if (url.pathname === '/api/health') return json(res, 200, { ok: true, version, backend, model: cfg.model, modelName: modelName(cfg.model), models: MODEL_KEYS, effort: cfg.effort || '', efforts: EFFORT_KEYS, name: cfg.name, brain: BRAIN, notes: graph.notes, depts: DEPT_KEYS,
-      agents: agentsOut(), setup: setupMap(), routines: (l => ({ count: l.length, paused: l.filter(r => r.paused).length, depts: routines.ALLOWED }))(loadRoutines()), roster: { customised: roster.customised, briefed: roster.briefed, files: roster.files, problems: roster.problems }, skills: (({ count, shipped, brain, problems }) => ({ count, shipped, brain, problems }))(skills.summary()), tools: backend === 'claude-cli', mcp: mcp.summary(), teams: TEAMS, browser: mcp.summary().browser });
+    if (url.pathname === '/api/health') {
+      const claude = PROVIDER === 'claude';
+      const mcpState = mcpSummary();
+      const teamsState = claude ? TEAMS : { enabled: false, max: 0 };
+      return json(res, 200, { ok: true, office: OFFICE, provider: PROVIDER, version, backend: claude ? backend : PROVIDER, launcherUrl: LAUNCHER_URL,
+        model: claude ? cfg.model : null, modelName: claude ? modelName(cfg.model) : null, models: claude ? MODEL_KEYS : [],
+        effort: claude ? cfg.effort || '' : '', efforts: claude ? EFFORT_KEYS : [], name: cfg.name, brain: BRAIN, notes: graph.notes, depts: DEPT_KEYS,
+        agents: agentsOut(), setup: setupMap(), capabilities: codexProvider?.capabilities() || null, routines: (l => ({ count: l.length, paused: l.filter(r => r.paused).length, depts: routines.ALLOWED }))(loadRoutines()), roster: { customised: roster.customised, briefed: roster.briefed, files: roster.files, problems: roster.problems }, skills: (({ count, shipped, brain, problems }) => ({ count, shipped, brain, problems }))(skills.summary()), tools: claude && backend === 'claude-cli', mcp: mcpState, teams: teamsState, browser: mcpState.browser });
+    }
     if (url.pathname === '/api/agents') return json(res, 200, { agents: agentsOut(), problems: roster.problems, files: roster.files });
     if (url.pathname === '/api/skills') return json(res, 200, refreshSkills().summary()); // reloads from disk: edit a skill, hit this, see it
     if (url.pathname === '/api/lessons') return json(res, 200, { dir: learn.dir(BRAIN), agents: AGENTS.map(a => ({ id: a.id, name: a.name, ...learn.read(BRAIN, a.id) })).filter(x => x.rules.length || x.oneOffs.length) });
-    if (url.pathname === '/api/mcp') { if (url.searchParams.get('refresh') === '1') await mcp.discover(); else await discovering; return json(res, 200, { ...mcp.summary(), tools: backend === 'claude-cli' }); }
+    if (url.pathname === '/api/mcp') {
+      if (PROVIDER === 'claude') { if (url.searchParams.get('refresh') === '1') await (discoverMcp || mcp.discover)(); else await discovering; }
+      return json(res, 200, { ...mcpSummary(), provider: PROVIDER, tools: PROVIDER === 'claude' && backend === 'claude-cli' });
+    }
     if (url.pathname === '/api/brain') return json(res, 200, graph);
     if (url.pathname === '/api/usage') return json(res, 200, await getUsage(url.searchParams.get('refresh') === '1')); // V3.6: the plan's gauge (never a 500: unavailable is an answer)
     if (url.pathname === '/api/translate' && req.method === 'GET') { // V3.7: prefill the page's dictionary instantly
@@ -479,6 +541,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { lang, map: dict });
     }
     if (url.pathname === '/api/translate' && req.method === 'POST') {
+      if (PROVIDER !== 'claude') return json(res, 501, { error: `Translation is not available for provider "${PROVIDER}"` });
       const len = +req.headers['content-length'] || 0;
       if (len > 200000) return json(res, 413, { error: 'payload too large' });
       const b = await body(req);
@@ -522,7 +585,7 @@ const server = http.createServer(async (req, res) => {
       if (dueAt && dueAt < Date.now() - 60000) return json(res, 400, { error: 'that time has passed — pick one that is still ahead' });
       const r = await route(dept, String(text).trim());
       const asTeam = TEAMS.enabled && (team === true || teams.intent(text)); // V3.2 (16 Sep): TEAM in the bar, or "as a team" in the sentence → the lead owns it and splits it
-      const task = { id: nid(), dept, agent: asTeam ? leadOf(dept).id : r.agent, title: r.title, text: String(text).trim(), plan: r.plan, eta: r.eta, why: asTeam ? `team — ${leadOf(dept).name} splits it across the desks` : r.why, state: 'next', addedAt: Date.now(), by: 'you', model: normModel(model) || undefined, effort: normEffort(effort) || undefined, // model/effort: set on this task (beats routine, agent, office)
+      const task = { id: nid(), dept, agent: asTeam ? leadOf(dept).id : r.agent, title: r.title, text: String(text).trim(), plan: r.plan, eta: r.eta, why: asTeam ? `team — ${leadOf(dept).name} splits it across the desks` : r.why, state: 'next', addedAt: Date.now(), by: 'you', model: PROVIDER === 'claude' ? normModel(model) || undefined : (typeof model === 'string' ? model.trim() || undefined : undefined), effort: PROVIDER === 'claude' ? normEffort(effort) || undefined : undefined, // model/effort: set on this task (beats routine, agent, office)
         team: asTeam ? { lead: leadOf(dept).id, asked: team === true ? 'you' : 'text' } : undefined };
       if (dueAt) { task.state = 'scheduled'; task.dueAt = dueAt; task.needsOk = r.needsOk; } // waits for its minute; needsOk decides whether it then waits for the OK
       const list = load(); list.push(task); save(list);
@@ -538,7 +601,7 @@ const server = http.createServer(async (req, res) => {
       const note = String(feedback || '').trim();
       console.log(`${m[2] === 'approve' ? '✅' : '↩'} ${task.id} ${m[2] === 'approve' ? 'approved — ' + agentName(task.agent) + ' is sending' : 'sent back: ' + note.slice(0, 80)}`);
       enqueue(() => runServerTask(task.id, m[2] === 'approve' ? { approve: true } : { feedback: note || 'Not this. Rework it.' }))
-        .then(t => { if (m[2] === 'reject' && note && t && !t.error) { const a = AGENTS.find(x => x.id === t.agent); return learn.classify(ask, a, t, note).then(v => { const r = learn.record(BRAIN, a, t, note, v); console.log(`  ↳ ${a.name} ${r.standing ? 'learned a rule' : 'noted a one-off'}: ${r.line.slice(0, 100)}`); }); } })
+        .then(t => { if (PROVIDER === 'claude' && m[2] === 'reject' && note && t && !t.error) { const a = AGENTS.find(x => x.id === t.agent); return learn.classify(ask, a, t, note).then(v => { const r = learn.record(BRAIN, a, t, note, v); console.log(`  ↳ ${a.name} ${r.standing ? 'learned a rule' : 'noted a one-off'}: ${r.line.slice(0, 100)}`); }); } })
         .catch(e => console.warn('approval:', e.message));
       return json(res, 200, { ok: true, id: task.id, state: 'doing' });
     }
@@ -547,18 +610,20 @@ const server = http.createServer(async (req, res) => {
       if (!task) return json(res, 404, { error: 'no such task' });
       const { feedback } = m[2] === 'revise' ? await body(req) : {};
       task.state = 'doing'; task.startedAt = Date.now(); save(list);
-      try {
-        const { result, read, tools, used, skills: sk, modelUsed, modelFrom, modelId: ran, effortUsed, effortFrom, team } = await run(task, feedback);
-        Object.assign(task, { state: 'done', doneAt: Date.now(), result, read, tools, used, skills: sk, error: false, modelUsed, modelFrom, modelId: ran, effortUsed, effortFrom, ...(team ? { team } : {}) });
-        task.note = writeNote(task);
-        await rebuildGraph();
-      } catch (e) {
-        Object.assign(task, { state: 'done', doneAt: Date.now(), result: 'Could not complete this task: ' + e.message, error: true });
-      }
+      await trackWork((async () => {
+        try {
+          const { result, read, tools, used, skills: sk, modelUsed, modelFrom, modelId: ran, effortUsed, effortFrom, team, threadId, providerStatus, usage: taskUsage, error } = await (taskRunner || run)(task, feedback);
+          Object.assign(task, { state: 'done', doneAt: Date.now(), result, read, tools, used, skills: sk, error: !!error, threadId, usage: taskUsage, providerStatus, modelUsed, modelFrom, modelId: ran, effortUsed, effortFrom, ...(team ? { team } : {}) });
+          if (!task.error) { task.note = writeNote(task); await rebuildGraph(); }
+        } catch (e) {
+          Object.assign(task, { state: 'done', doneAt: Date.now(), result: 'Could not complete this task: ' + e.message, error: true });
+        }
+        const latest = load(); const i = latest.findIndex(t => t.id === task.id); if (i >= 0) latest[i] = task; save(latest);
+      })());
       const l2 = load(); const i = l2.findIndex(t => t.id === task.id); if (i >= 0) l2[i] = task; save(l2);
       console.log(`${task.error ? '✗' : '✓'} ${task.id} ${task.error ? 'failed' : 'done'} (${task.result.length} chars${task.tools?.length ? ', tools: ' + task.tools.join(' ') : ''}${task.note ? ', note: ' + task.note : ''})`);
       json(res, 200, task);
-      if (feedback && !task.error) { // learn from the correction, after the reply is out the door
+      if (PROVIDER === 'claude' && feedback && !task.error) { // learn from the correction, after the reply is out the door
         const a = AGENTS.find(x => x.id === task.agent);
         learn.classify(ask, a, task, feedback).then(v => { const r = learn.record(BRAIN, a, task, feedback, v); console.log(`  ↳ ${a.name} ${r.standing ? 'learned a rule' : 'noted a one-off'}: ${r.line.slice(0, 100)}`); })
           .catch(e => console.warn('learn:', e.message));
@@ -567,6 +632,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (m && req.method === 'DELETE') { save(load().filter(t => t.id !== m[1])); return json(res, 200, { ok: true }); }
     if (url.pathname === '/api/chat' && req.method === 'POST') {
+      if (PROVIDER !== 'claude') return json(res, 501, { error: `Chat is not available for provider "${PROVIDER}"` });
       const { agent, text, history } = await body(req);
       if (!text || !String(text).trim()) return json(res, 400, { error: 'empty message' });
       const a = AGENTS.find(x => x.id === agent); if (!a) return json(res, 400, { error: 'unknown agent' });
@@ -577,26 +643,88 @@ const server = http.createServer(async (req, res) => {
       if (leadOf(a.department).id === a.id) { // the department lead can run the set-up interview
         refreshSkills();
         const o = await onboard.handle(String(text).trim(), { dept: a.department, deptName: DEPTS[a.department].name, lead: a, agents: AGENTS.filter(x => x.department === a.department),
-          connected: mcp.summary().servers?.filter(x => x.status === 'connected').map(x => x.name || x.key) || [], brainPath: BRAIN, dataDir: DATA, ask, business: cfg.name, afterWrite: refreshSkills });
+          connected: mcpSummary().servers?.filter(x => x.status === 'connected').map(x => x.name || x.key) || [], brainPath: BRAIN, dataDir: DATA, ask, business: cfg.name, afterWrite: refreshSkills });
         if (o) { if (o.wrote) console.log(`★ ${a.name} set up ${DEPTS[a.department].name}: ${o.wrote.briefs.length} briefs${o.wrote.skill ? ', skill ' + o.wrote.skill.name : ''}`); return json(res, 200, { reply: o.reply, read: [], tools: [], interview: !o.wrote, setup: setupMap() }); }
       }
       const r = await chat(agent, String(text).trim(), history);
       return json(res, 200, { ...r, interview: false });
     }
     json(res, 404, { error: 'not found' });
-  } catch (e) { console.error(e); json(res, 500, { error: e.message }); }
+  } catch (e) { if (e.statusCode === 400) return json(res, 400, { error: e.message }); console.error(e); json(res, 500, { error: e.message }); }
 });
-server.listen(cfg.port, () => {
+async function start() {
+  if (server.listening) return server.address();
+  await rebuildGraph();
+  // Test doubles and non-Claude offices must never probe the local Claude CLI.
+  if (!provider && PROVIDER === 'claude') discovering = (discoverMcp || mcp.discover)().then(l => { console.log(`  connectors: ${l.filter(s => s.status === 'connected').length} connected of ${l.length} (claude mcp list)`); return l; });
+  await new Promise((resolve, reject) => {
+    const onError = error => { server.off('listening', onListening); reject(error); };
+    const onListening = () => { server.off('error', onError); resolve(); };
+    server.once('error', onError); server.once('listening', onListening); server.listen(cfg.port);
+  });
+  const address = server.address();
   console.log(`Agents Office ${version} → http://localhost:${cfg.port}`);
-  console.log(`  business: ${cfg.name}   brain: ${BRAIN} (${graph.notes} notes, ${graph.links.length} links)   claude: ${backend} · ${modelName(cfg.model)}${cfg.effort ? ' · effort ' + cfg.effort : ''} by default (routing on Sonnet)`);
-  getUsage(true).then(u => console.log(u.source === 'claude' ? `  usage: session ${u.session?.percent ?? '—'}% · week ${u.week?.percent ?? '—'}% (your Claude plan, as Claude Code shows it)` : `  usage: Claude's gauge unavailable (${u.reason}) — showing the office's own count`)).catch(() => {});
+  console.log(`  business: ${cfg.name}   brain: ${BRAIN} (${graph.notes} notes, ${graph.links.length} links)   ${PROVIDER === 'claude' ? `claude: ${backend} · ${modelName(cfg.model)}${cfg.effort ? ' · effort ' + cfg.effort : ''} by default (routing on Sonnet)` : `provider: ${PROVIDER}`}`);
+  if (!provider && PROVIDER === 'claude') getUsage(true).then(u => console.log(u.source === 'claude' ? `  usage: session ${u.session?.percent ?? '—'}% · week ${u.week?.percent ?? '—'}% (your Claude plan, as Claude Code shows it)` : `  usage: Claude's gauge unavailable (${u.reason}) — showing the office's own count`)).catch(() => {});
   console.log(`  tasks: ${FILE}   notes the agents write: ${NOTES_DIR}`);
   const rl = loadRoutines(); const nx = rl.filter(r => !r.paused && r.nextAt).sort((a, b) => a.nextAt - b.nextAt)[0];
   console.log(`  routines: ${rl.length} loaded${rl.some(r => r.paused) ? ' (' + rl.filter(r => r.paused).length + ' paused)' : ''}${nx ? ' · next ' + untilText(nx.nextAt) + ' ' + nx.title.toUpperCase() + ' (' + nx.agent + ')' : ''} · ${rlist.path}`);
-  setInterval(tickRoutines, 20000); tickRoutines(); // the clock: every 20 s; the first tick catches up anything missed while the office was off (once, marked LATE)
-  console.log(`  agents: 35 (${roster.customised} customised${roster.briefed ? ', ' + roster.briefed + ' briefed' : ''}${roster.files.length ? ' via ' + roster.files.join(' + ') : ''})   tools: ${backend === 'claude-cli' ? 'connected MCP servers' + (cfg.tools?.web === false ? '' : ' + web') + (mcp.browserOn() ? ' + the owner\'s Chrome (' + (mcp.browserState().installed ? 'extension paired' + (mcp.browserState().device ? ': ' + mcp.browserState().device : '') : 'extension NOT paired — run `claude --chrome` once') + ')' : '') : 'none on the API backend'}`);
-  console.log(`  teams: ${TEAMS.enabled ? 'on — TEAM in the bar or "as a team" in the sentence; the lead splits it across up to ' + TEAMS.max + ' desks' : 'off (teams.enabled in office.config.json)'}`);
+  routineTimer = setInterval(tickRoutines, 20000); tickRoutines(); // the clock: every 20 s; the first tick catches up anything missed while the office was off (once, marked LATE)
+  console.log(`  agents: 35 (${roster.customised} customised${roster.briefed ? ', ' + roster.briefed + ' briefed' : ''}${roster.files.length ? ' via ' + roster.files.join(' + ') : ''})   tools: ${PROVIDER !== 'claude' ? 'unknown (Codex SDK does not report tool capabilities)' : backend === 'claude-cli' ? 'connected MCP servers' + (cfg.tools?.web === false ? '' : ' + web') + (mcp.browserOn() ? ' + the owner\'s Chrome (' + (mcp.browserState().installed ? 'extension paired' + (mcp.browserState().device ? ': ' + mcp.browserState().device : '') : 'extension NOT paired — run `claude --chrome` once') + ')' : '') : 'none on the API backend'}`);
+  console.log(`  teams: ${PROVIDER !== 'claude' ? 'unavailable (not reported by provider)' : TEAMS.enabled ? 'on — TEAM in the bar or "as a team" in the sentence; the lead splits it across up to ' + TEAMS.max + ' desks' : 'off (teams.enabled in office.config.json)'}`);
   const sk = skills.summary(); const setup = setupMap(); const notYet = DEPT_KEYS.filter(k => !setup[k]);
   console.log(`  skills: ${sk.count} (${sk.shipped} shipped in skills/, ${sk.brain} in ${path.join(NOTES_DIR, 'skills')})${sk.problems.length ? '   ⚠ ' + sk.problems.length + ' problem' + (sk.problems.length > 1 ? 's' : '') + ' — see npm run check' : ''}`);
   console.log(`  set up: ${notYet.length === DEPT_KEYS.length ? 'no department yet — open a lead\'s chat and say "set up"' : notYet.length ? DEPT_KEYS.length - notYet.length + ' of 6 departments (not yet: ' + notYet.map(k => DEPTS[k].name).join(', ') + ')' : 'all six departments'}   lessons: ${learn.dir(BRAIN)}`);
-});
+  return address;
+}
+
+async function close({ graceMs = 5000 } = {}) {
+  if (!server.listening) return { drained: activeWork.size === 0, pendingWork: activeWork.size };
+  closing = true;
+  if (routineTimer) clearInterval(routineTimer);
+  const stopped = new Promise(resolve => server.close(resolve));
+  let graceTimer;
+  const timeout = new Promise(resolve => { graceTimer = setTimeout(() => resolve(false), Math.max(0, graceMs)); });
+  const drained = await Promise.race([
+    Promise.all([
+      (async () => { while (activeWork.size) await Promise.allSettled([...activeWork]); })(),
+      stopped,
+    ]).then(() => true),
+    timeout,
+  ]);
+  clearTimeout(graceTimer);
+  if (!drained) server.closeAllConnections?.();
+  await stopped;
+  // State transitions are persisted synchronously; final snapshot captures any last mutation.
+  save(load());
+  return { drained, pendingWork: activeWork.size };
+}
+
+return { server, start, close };
+}
+
+export function attachShutdownHandlers(runtime, { processRef = process, warn = console.warn } = {}) {
+  let stopping = false;
+  const stop = signal => {
+    if (stopping) return;
+    stopping = true;
+    runtime.close().then(result => {
+      if (result?.pendingWork) warn(`${signal}: grace period expired with ${result.pendingWork} task(s) pending; allowing them to finish and persist.`);
+    }).catch(error => warn(`${signal}: shutdown failed: ${error.message}`));
+  };
+  const sigint = () => stop('SIGINT');
+  const sigterm = () => stop('SIGTERM');
+  processRef.on('SIGINT', sigint);
+  processRef.on('SIGTERM', sigterm);
+  return () => { processRef.off('SIGINT', sigint); processRef.off('SIGTERM', sigterm); };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const managedOffice = process.env.AO_OFFICE;
+  const officeConfig = managedOffice
+    ? { ...loadConfig({ office: managedOffice, env: process.env }), office: managedOffice, provider: process.env.AO_PROVIDER || managedOffice }
+    : loadConfig();
+  const runtime = await createOfficeRuntime({ officeConfig });
+  await runtime.start();
+  attachShutdownHandlers(runtime);
+}
