@@ -530,7 +530,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/lessons') return json(res, 200, { dir: learn.dir(BRAIN), agents: AGENTS.map(a => ({ id: a.id, name: a.name, ...learn.read(BRAIN, a.id) })).filter(x => x.rules.length || x.oneOffs.length) });
     if (url.pathname === '/api/mcp') {
       if (PROVIDER === 'claude') { if (url.searchParams.get('refresh') === '1') await (discoverMcp || mcp.discover)(); else await discovering; }
-      return json(res, 200, { ...mcpSummary(), tools: PROVIDER === 'claude' && backend === 'claude-cli' });
+      return json(res, 200, { ...mcpSummary(), provider: PROVIDER, tools: PROVIDER === 'claude' && backend === 'claude-cli' });
     }
     if (url.pathname === '/api/brain') return json(res, 200, graph);
     if (url.pathname === '/api/usage') return json(res, 200, await getUsage(url.searchParams.get('refresh') === '1')); // V3.6: the plan's gauge (never a 500: unavailable is an answer)

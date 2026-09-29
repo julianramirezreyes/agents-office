@@ -1,5 +1,19 @@
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
 const CLAUDE_MODEL_ALIASES = new Set(['sonnet', 'opus', 'fable']);
+export function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character]);
+}
+
+export function providerDisplayName(provider) {
+  return provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : 'office runtime';
+}
+
+export function modelBrandsForProvider(provider) {
+  return provider === 'claude' ? ['claude', 'chatgpt'] : [];
+}
+
 const isClaudeAlias = model => {
   const value = String(model).trim().toLowerCase();
   return CLAUDE_MODEL_ALIASES.has(value) || /^claude[-_. ]*(sonnet|opus|fable)(?:[-_. ]|$)/.test(value);

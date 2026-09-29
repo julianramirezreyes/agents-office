@@ -5,7 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
-import { createLauncher } from '../launcher.mjs';
+import { createLauncher, officeOriginAllowed } from '../launcher.mjs';
 
 const launchers = [];
 const roots = [];
@@ -302,4 +302,30 @@ test('launcher_exposesNoTaskOrChatProxyRoutes', async () => {
 
   assert.equal((await fetch(`${base}/api/tasks`)).status, 404);
   assert.equal((await fetch(`${base}/api/chat`, { method: 'POST' })).status, 404);
+});
+
+test('launcher_healthAllowsOnlyConfiguredOfficeOriginsWithoutCredentials', async () => {
+  const config = await fixture();
+  const { base } = await startLauncher(config, {
+    spawnProcess: () => new Child(),
+    fetchHealth: async (_url, office) => ({ ok: true, office, provider: office }),
+  });
+
+  for (const origin of ['http://127.0.0.1:4520', 'http://127.0.0.1:4521']) {
+    const response = await fetch(`${base}/api/health`, { headers: { Origin: origin } });
+    assert.equal(response.headers.get('access-control-allow-origin'), origin);
+    assert.match(response.headers.get('vary') || '', /Origin/i);
+    assert.equal(response.headers.get('access-control-allow-credentials'), null);
+  }
+
+  const rejected = await fetch(`${base}/api/health`, { headers: { Origin: 'http://evil.example' } });
+  assert.equal(rejected.headers.get('access-control-allow-origin'), null);
+});
+
+test('launcher_originAllowlistRequiresAnExactConfiguredOrigin', () => {
+  const allowed = ['http://127.0.0.1:4520', 'http://127.0.0.1:4521'];
+  assert.equal(officeOriginAllowed(allowed[0], allowed), true);
+  for (const origin of ['http://127.0.0.1:4520.evil.example', 'http://127.0.0.1:4520/path', 'null', '*', undefined]) {
+    assert.equal(officeOriginAllowed(origin, allowed), false);
+  }
 });

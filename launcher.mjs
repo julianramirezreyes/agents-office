@@ -28,8 +28,16 @@ function safeOfficeUrl(candidate, configuredUrl) {
   return { url: target.href };
 }
 
-function response(res, status, body, type = 'application/json; charset=utf-8') {
-  res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
+export function officeOriginAllowed(origin, officeOrigins) {
+  if (typeof origin !== 'string' || !origin || origin === 'null') return false;
+  try {
+    const parsed = new URL(origin);
+    return parsed.origin === origin && officeOrigins.includes(parsed.origin);
+  } catch { return false; }
+}
+
+function response(res, status, body, type = 'application/json; charset=utf-8', headers = {}) {
+  res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...headers });
   res.end(type.startsWith('application/json') ? JSON.stringify(body) : body);
 }
 
@@ -77,6 +85,7 @@ export function createLauncher({
   const configuredUrls = Object.fromEntries(OFFICES.map(office => {
     return [office, `http://127.0.0.1:${paths[office].port}`];
   }));
+  const officeOrigins = OFFICES.map(office => new URL(configuredUrls[office]).origin);
   const officeState = Object.fromEntries(OFFICES.map(office => [office, {
     office,
     provider: office,
@@ -125,7 +134,10 @@ export function createLauncher({
           state.error = String(error?.message || error);
         }
       }));
-      return response(res, 200, { ok: true, offices: Object.fromEntries(OFFICES.map(office => [office, { ...officeState[office] }])) });
+      const origin = req.headers.origin;
+      const corsHeaders = { vary: 'Origin' };
+      if (officeOriginAllowed(origin, officeOrigins)) corsHeaders['access-control-allow-origin'] = origin;
+      return response(res, 200, { ok: true, offices: Object.fromEntries(OFFICES.map(office => [office, { ...officeState[office] }])) }, 'application/json; charset=utf-8', corsHeaders);
     }
     return response(res, 404, { error: 'not found' });
   });
