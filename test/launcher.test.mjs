@@ -91,6 +91,26 @@ test('launcher_healthIsIndependentWhenOneChildFails', async () => {
   assert.match(health.offices.codex.error, /did not answer/);
 });
 
+test('launcherNavigationKeepsBothProcessesAlive', async () => {
+  const config = await fixture();
+  const children = [];
+  const { base } = await startLauncher(config, {
+    spawnProcess: () => { const child = new Child(); children.push(child); return child; },
+    fetchHealth: async (url, office) => ({ ok: true, office, provider: office, url: `${url}/office` }),
+  });
+
+  const home = await fetch(base).then(response => response.text());
+  assert.match(home, /Claude/);
+  assert.match(home, /Codex/);
+  const health = await fetch(`${base}/api/health`).then(response => response.json());
+  const targets = [health.offices.claude.url, health.offices.codex.url];
+  assert.deepEqual(targets, ['http://127.0.0.1:4520/office', 'http://127.0.0.1:4521/office']);
+  // Following either office URL changes the browser destination only; launcher-owned children remain untouched.
+  assert.deepEqual(children.map(child => child.signals), [[], []]);
+  assert.equal(health.offices.claude.status, 'ready');
+  assert.equal(health.offices.codex.status, 'ready');
+});
+
 test('launcher_rejectsHealthForTheWrongOfficeIdentity', async () => {
   const config = await fixture();
   let mismatch = 'office';

@@ -230,3 +230,93 @@ test('officeRuntime_closeDeadlineAlsoCoversAnIncompleteHttpRequest', async () =>
   assert.equal(result.drained, false);
   assert.equal(result.pendingWork, 0);
 });
+
+test('launcher_twoOfficesRunIndependentTasksAtOnce', async () => {
+  const claudePaths = fixture(), codexPaths = fixture();
+  const task = (id, title) => ({ id, dept: 'emails', agent: 'elead', title, text: title, state: 'next', addedAt: Date.now(), plan: [] });
+  fs.writeFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), JSON.stringify([task('claude-task', 'Claude task')]));
+  fs.writeFileSync(path.join(codexPaths.dataRoot, 'tasks.json'), JSON.stringify([task('codex-task', 'Codex task')]));
+  let release;
+  let started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const bothStarted = new Promise(resolve => { started = resolve; });
+  const calls = [];
+  const runner = office => async () => {
+    calls.push(office);
+    if (calls.length === 2) started();
+    await gate;
+    return { result: `${office} completed`, read: [], tools: [], used: [], skills: [] };
+  };
+  const claude = await startRuntime({ ...claudePaths, office: 'claude', port: 0, runtimeOptions: { taskRunner: runner('claude') }, provider: { id: 'claude' } });
+  const codex = await startRuntime({ ...codexPaths, office: 'codex', port: 0, runtimeOptions: { taskRunner: runner('codex') }, provider: { id: 'codex' } });
+  const requests = [
+    fetch(`${claude.base}/api/tasks/claude-task/run`, { method: 'POST' }),
+    fetch(`${codex.base}/api/tasks/codex-task/run`, { method: 'POST' }),
+  ];
+  try {
+    let timeout;
+    await Promise.race([bothStarted, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('both office tasks did not start concurrently')), 1000); })]);
+    clearTimeout(timeout);
+    assert.deepEqual(calls.sort(), ['claude', 'codex']);
+  } finally { release(); }
+  const responses = await Promise.all(requests);
+  assert.deepEqual(responses.map(response => response.status), [200, 200]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), 'utf8'))[0].result, 'claude completed');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(codexPaths.dataRoot, 'tasks.json'), 'utf8'))[0].result, 'codex completed');
+});
+
+test('claudeSnapshotIsByteIdenticalAfterCodexStartup', async () => {
+  const claudePaths = fixture(), codexPaths = fixture();
+  const sentinel = path.join(claudePaths.root, 'office.config.local.json');
+  fs.writeFileSync(sentinel, Buffer.from('{"model":"sonnet","preserve":"\u00e9"}\n'));
+  fs.writeFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), Buffer.from('[{"id":"claude-history"}]\n'));
+  fs.writeFileSync(path.join(claudePaths.brainPath, 'claude-note.md'), Buffer.from('Claude-only fixture\n'));
+  const snapshot = () => [sentinel, path.join(claudePaths.dataRoot, 'tasks.json'), path.join(claudePaths.brainPath, 'claude-note.md')].map(file => fs.readFileSync(file));
+  const before = snapshot();
+  await startRuntime({ ...claudePaths, office: 'claude', port: 0, provider: { id: 'claude' } });
+  await startRuntime({ ...codexPaths, office: 'codex', port: 0, provider: { id: 'codex' } });
+  const after = snapshot();
+  assert.deepEqual(after, before);
+  assert.equal(fs.existsSync(path.join(codexPaths.root, 'office.config.local.json')), false);
+});
+
+test('healthAndStorageDoNotCrossOfficeBoundaries', async () => {
+  const claudePaths = fixture(), codexPaths = fixture();
+  const claudeTasks = [{ id: 'claude-only', title: 'Claude fixture' }];
+  const codexTasks = [{ id: 'codex-only', title: 'Codex fixture' }];
+  fs.writeFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), JSON.stringify(claudeTasks));
+  fs.writeFileSync(path.join(codexPaths.dataRoot, 'tasks.json'), JSON.stringify(codexTasks));
+  const claude = await startRuntime({ ...claudePaths, office: 'claude', port: 0, provider: { id: 'claude' } });
+  const codex = await startRuntime({ ...codexPaths, office: 'codex', port: 0, provider: { id: 'codex' } });
+  const [healthClaude, healthCodex, tasksClaude, tasksCodex] = await Promise.all([
+    fetch(`${claude.base}/api/health`).then(response => response.json()),
+    fetch(`${codex.base}/api/health`).then(response => response.json()),
+    fetch(`${claude.base}/api/tasks`).then(response => response.json()),
+    fetch(`${codex.base}/api/tasks`).then(response => response.json()),
+  ]);
+  assert.equal(healthClaude.office, 'claude');
+  assert.equal(healthCodex.office, 'codex');
+  assert.deepEqual(tasksClaude, claudeTasks);
+  assert.deepEqual(tasksCodex, codexTasks);
+  assert.notEqual(claudePaths.dataRoot, codexPaths.dataRoot);
+  assert.notEqual(claudePaths.brainPath, codexPaths.brainPath);
+});
+
+test('restartingOneOfficePreservesOtherOfficeAndOwnTaskHistory', async () => {
+  const claudePaths = fixture(), codexPaths = fixture();
+  const claudeTasks = [{ id: 'claude-history', title: 'Claude history' }];
+  const codexTasks = [{ id: 'codex-history', title: 'Codex history' }];
+  fs.writeFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), JSON.stringify(claudeTasks));
+  fs.writeFileSync(path.join(codexPaths.dataRoot, 'tasks.json'), JSON.stringify(codexTasks));
+  const claude = await startRuntime({ ...claudePaths, office: 'claude', port: 0, provider: { id: 'claude' } });
+  const codex = await startRuntime({ ...codexPaths, office: 'codex', port: 0, provider: { id: 'codex' } });
+  await claude.runtime.close({ graceMs: 0 });
+  runtimes.splice(runtimes.indexOf(claude.runtime), 1);
+  const codexHealth = await fetch(`${codex.base}/api/health`).then(response => response.json());
+  const restartedClaude = await startRuntime({ ...claudePaths, office: 'claude', port: 0, provider: { id: 'claude' } });
+  assert.equal(codexHealth.office, 'codex');
+  assert.equal((await fetch(`${codex.base}/api/tasks`).then(response => response.json()))[0].id, 'codex-history');
+  assert.equal((await fetch(`${restartedClaude.base}/api/tasks`).then(response => response.json()))[0].id, 'claude-history');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(codexPaths.dataRoot, 'tasks.json'), 'utf8')), codexTasks);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), 'utf8')), claudeTasks);
+});

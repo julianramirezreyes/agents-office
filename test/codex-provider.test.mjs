@@ -228,3 +228,57 @@ test('codexRuntime_doesNotApproveOrWriteNoteWhenCodexFailsWithoutError', async (
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('codexProviderFailureLeavesClaudeAvailable', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-provider-failure-'));
+  const makePaths = office => {
+    const dataRoot = path.join(root, office, 'data');
+    const brainPath = path.join(root, office, 'brain');
+    fs.mkdirSync(dataRoot, { recursive: true });
+    fs.mkdirSync(brainPath, { recursive: true });
+    return { dataRoot, brainPath };
+  };
+  const claudePaths = makePaths('claude'), codexPaths = makePaths('codex');
+  const task = id => [{ id, dept: 'emails', agent: 'elead', title: id, text: id, state: 'next', addedAt: Date.now(), plan: [] }];
+  fs.writeFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), JSON.stringify(task('claude-survives')));
+  fs.writeFileSync(path.join(codexPaths.dataRoot, 'tasks.json'), JSON.stringify(task('codex-fails')));
+  let claudeRuns = 0, codexRuns = 0;
+  const makeRuntime = async (office, paths, provider, runtimeOptions = {}) => {
+    const runtime = await createOfficeRuntime({
+      officeConfig: { ...loadConfig(), office, provider: office, port: 0, ...paths },
+      provider,
+      ...runtimeOptions,
+    });
+    await runtime.start();
+    return { runtime, base: `http://127.0.0.1:${runtime.server.address().port}` };
+  };
+  const claude = await makeRuntime('claude', claudePaths, { id: 'claude' }, { taskRunner: async () => {
+    claudeRuns++;
+    return { result: 'Claude fixture completed', read: [], tools: [], used: [], skills: [] };
+  } });
+  const codex = await makeRuntime('codex', codexPaths, { id: 'codex', async runTask() { codexRuns++; throw new Error('Codex SDK fixture failure'); } });
+  try {
+    const failed = await fetch(`${codex.base}/api/tasks/codex-fails/run`, { method: 'POST' });
+    assert.equal(failed.status, 200);
+    let failedTask;
+    for (let i = 0; i < 100; i++) {
+      failedTask = JSON.parse(fs.readFileSync(path.join(codexPaths.dataRoot, 'tasks.json'), 'utf8'))[0];
+      if (failedTask.state === 'done') break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(failedTask.state, 'done', 'Codex failure should settle its own persisted task');
+    assert.equal(failedTask.error, true);
+    assert.match(failedTask.result, /Codex SDK fixture failure/);
+    const health = await fetch(`${claude.base}/api/health`).then(response => response.json());
+    assert.equal(health.office, 'claude');
+    assert.equal(health.provider, 'claude');
+    assert.equal((await fetch(`${claude.base}/api/tasks/claude-survives/run`, { method: 'POST' })).status, 200);
+    for (let i = 0; i < 100 && JSON.parse(fs.readFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), 'utf8'))[0].state !== 'done'; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(claudePaths.dataRoot, 'tasks.json'), 'utf8'))[0].result, 'Claude fixture completed');
+    assert.equal(codexRuns, 1);
+    assert.equal(claudeRuns, 1);
+  } finally {
+    await Promise.all([claude.runtime.close({ graceMs: 100 }), codex.runtime.close({ graceMs: 100 })]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
