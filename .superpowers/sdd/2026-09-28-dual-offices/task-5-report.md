@@ -27,5 +27,5 @@ Los controles de Codex ahora permanecen ocultos salvo que el runtime reporte cap
 
 - **Runtime harness:** N/A — la navegación se prueba con un fetcher doble; la propagación de URL se prueba mediante los dobles de spawn/health existentes y un home enlazado al puerto efímero.
 - **Rollback:** revertir los commits de DO-05 para retirar el helper, navegación, cambios de presentación, pruebas y artefacto generado, preservando las tareas y cambios anteriores.
-- **Commit de implementación:** se registrará en la actualización documental que sigue a este commit.
+- **Commit de implementación:** `e03dd6e` (`feat: add cross-office navigation controls`).
 - **Resolución de skills:** `paths-injected`; se leyeron los archivos exactos de `test-driven-development`, `work-unit-commits` y `verification-before-completion`. No se usaron subagentes.
