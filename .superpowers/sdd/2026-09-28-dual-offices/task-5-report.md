@@ -41,3 +41,13 @@ Los controles de Codex ahora permanecen ocultos salvo que el runtime reporte cap
 - **Runtime harness:** launcher HTTP local con puertos efímeros y dobles de child/health; no se arrancaron oficinas ni providers reales.
 - **Rollback:** revertir el commit de correcciones DO-05 para restaurar el contrato CORS anterior, renderizado de modelos, textos de proveedor, presentación MCP y su artefacto `dist`; no revertir commits previos DO-05 ni tocar el checkout fuente.
 - **Commit de corrección:** `82206d5` (`fix: address DO-05 review findings`). Este ajuste se limita a launcher/servidor/UI MCP y tareas, pruebas de regresión y HTML compilado. El commit documental registra esta evidencia por separado.
+
+## Seguimiento residual de revisión
+
+- **CORS loopback:** la allowlist del launcher sigue ligada a los puertos configurados, pero acepta los hosts explícitos de loopback `127.0.0.1`, `localhost` e `[::1]`. Conserva protocolo y puerto configurados y rechaza nombres externos, puertos ajenos, credenciales, rutas y origins no canónicos. Pruebas HTTP envían Origin real para `localhost` y `[::1]` en los dos puertos configurados, más casos negativos de host externo y puerto distinto; no se arrancan oficinas reales.
+- **CTA de conectores vacíos:** Claude conserva su instrucción existente; Codex y proveedor desconocido muestran el texto neutral «No connectors are available in this office.» sin sugerir claude.ai ni comandos Claude.
+- **TDD:** RED reprodujo rechazo CORS de `http://localhost:4520` y ausencia del helper de copy neutral; GREEN pasó con la allowlist ampliada y copy por proveedor.
+- **Verificación:** `node --test test/launcher.test.mjs test/office-navigation.test.mjs` — 35/35; `node --test test/*.test.mjs` — 126/126; `npm run build` — correcto, HTML generado 1491 KB; `git diff --check` — limpio. El build regeneró `src/braingraph.js` solo por la fecha y se restauró; se conserva `dist/command-centre-v2.html`.
+- **Límites:** no se usaron provider/auth/child real, instalación, `.codegraph` en commits ni `npm run check:live`.
+- **Rollback:** revertir el commit de seguimiento para retirar las alias loopback del CORS y restaurar CTA anterior, con sus pruebas, ODD/reporte y artefacto generado; dejar intactos los commits anteriores de DO-05.
+- **Commit de seguimiento:** `76131e4` (`fix: accept supported loopback origins and neutralize Codex connector copy`).
